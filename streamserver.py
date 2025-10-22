@@ -57,7 +57,6 @@ PAGE = """\
 <html>
 <head>
 <title>Motion Detection Stream</title>
-<meta http-equiv="refresh" content="5">
 </head>
 <body>
 <h1>🎥 Motion Detection Stream</h1>

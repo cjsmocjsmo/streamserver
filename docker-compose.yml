@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  motion-detection-pi3b:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    image: motion-stream-pi3b:latest
+    container_name: motion-detection-pi3b
+    
+    # Network configuration
+    ports:
+      - "8000:8000"
+    
+    # Hardware access for Pi 3B+
+    devices:
+      - "/dev/video0:/dev/video0"        # USB/CSI camera
+      - "/dev/vchiq:/dev/vchiq"          # VideoCore GPU access
+      - "/dev/vcsm:/dev/vcsm"            # VideoCore shared memory
+      - "/dev/gpiomem:/dev/gpiomem"      # GPIO access
+    
+    # Volume mounts
+    volumes:
+      - "./recordings:/app/recordings"           # Persistent video storage
+      - "./motion_config.ini:/app/motion_config.ini:ro"  # Configuration (read-only)
+      - "./logs:/app/logs"                       # Application logs
+      - "/opt/vc:/opt/vc:ro"                     # VideoCore libraries (read-only)
+      - "/boot:/boot:ro"                         # Boot partition access (read-only)
+    
+    # Environment variables for Pi 3B+
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/usr/lib/python3/dist-packages:/usr/local/lib/python3.11/site-packages
+      - LD_LIBRARY_PATH=/opt/vc/lib
+      - DISPLAY=:0
+    
+    # Security and permissions
+    privileged: true                    # Required for camera and GPU access on Pi
+    group_add:
+      - video                          # Video device access
+      - gpio                           # GPIO access
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Resource limits for Pi 3B+ (1GB RAM)
+    deploy:
+      resources:
+        limits:
+          memory: 512M                 # Limit to half available RAM
+        reservations:
+          memory: 256M                 # Reserve minimum RAM
+    
+    # Health monitoring
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s               # Allow extra time for Pi 3B+ startup
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"               # Larger logs for debugging
+        max-file: "3"
+
+# Optional: Network for multiple services
+networks:
+  default:
+    name: motion-detection-network

@@ -1,0 +1,79 @@
+# Docker ignore file for Raspberry Pi 3B+ Motion Detection Stream
+# Exclude files not needed in the container to reduce image size
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments (using system packages instead)
+venv/
+env/
+ENV/
+.env
+.venv
+
+# Recordings and logs (mounted as volumes)
+recordings/
+logs/
+*.mp4
+*.avi
+*.mov
+*.log
+
+# Development files
+.git/
+.gitignore
+.gitattributes
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Documentation (not needed in runtime)
+README.md
+*.md
+docs/
+
+# Installation scripts (for host system)
+install-*.sh
+uninstall-*.sh
+
+# Service files (for systemd, not Docker)
+*.service
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+*.tmp
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Test files
+test/
+tests/
+*_test.py
+test_*.py
+
+# Configuration backups
+*.bak
+*.backup
+motion_config.ini.bak

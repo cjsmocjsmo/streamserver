@@ -218,7 +218,7 @@ class MotionDetector:
         return motion_detected
 
 class CircularVideoBuffer:
-    def __init__(self, max_duration=10, fps=30):
+    def __init__(self, max_duration=5, fps=60):
         self.max_frames = int(max_duration * fps)
         self.buffer = deque(maxlen=self.max_frames)
         self.fps = fps
@@ -244,8 +244,8 @@ class VideoRecorder:
         self.current_filename = None
         self.recording_start_time = None
         self.post_motion_frames = 0
-        self.post_motion_duration = 10  # seconds
-        self.fps = 30
+        self.post_motion_duration = 5  # seconds
+        self.fps = 60
         
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
@@ -570,7 +570,7 @@ def run_stream_server():
                 # Create motion detection components
                 motion_detector = MotionDetector(threshold=25, min_area=1000)
                 video_recorder = VideoRecorder("recordings")
-                circular_buffer = CircularVideoBuffer(max_duration=10, fps=30)
+                circular_buffer = CircularVideoBuffer(max_duration=5, fps=60)
                 
                 # Create motion-aware output
                 global output
@@ -581,8 +581,9 @@ def run_stream_server():
                 logging.info("📊 Configuration:")
                 logging.info(f"   - Motion threshold: {motion_detector.threshold}")
                 logging.info(f"   - Minimum area: {motion_detector.min_area} pixels")
-                logging.info(f"   - Pre-record buffer: 10 seconds")
-                logging.info(f"   - Post-motion recording: 10 seconds")
+                logging.info(f"   - Pre-record buffer: 5 seconds")
+                logging.info(f"   - Post-motion recording: 5 seconds")
+                logging.info(f"   - Recording FPS: 60")
                 logging.info(f"   - Recording directory: {video_recorder.output_dir}")
                 logging.info(f"   - Video format: motion_YYYYMMDD_HHMMSS.mp4")
                 

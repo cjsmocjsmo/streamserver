@@ -59,7 +59,6 @@ PAGE = """\
 <title>Motion Detection Stream</title>
 </head>
 <body>
-<h1>Motion Detection Stream</h1>
 <div class="status-bar">
     <div class="status-item">
         <span class="label">Status:</span>
@@ -89,12 +88,6 @@ PAGE = """\
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         margin: 0;
         padding: 20px;
-    }
-    h1 {
-        text-align: center;
-        color: #00ff88;
-        margin-bottom: 20px;
-        text-shadow: 0 0 10px rgba(0, 255, 136, 0.3);
     }
     .status-bar {
         display: flex;

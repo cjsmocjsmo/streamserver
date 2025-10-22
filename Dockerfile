@@ -1,16 +1,16 @@
 # Dockerfile for Raspberry Pi 3B+ Motion Detection Stream Server
 # Optimized for ARM architecture with Debian packages priority
 
-FROM raspios/raspios_lite:latest
+FROM debian:trixie-slim
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONPATH=/usr/lib/python3/dist-packages:/usr/local/lib/python3.11/site-packages
+ENV PYTHONPATH=/usr/lib/python3/dist-packages:/usr/local/lib/python3.12/site-packages
 
 # Set labels
 LABEL maintainer="Motion Detection Stream Server"
-LABEL description="Raspberry Pi 3B+ optimized motion detection streaming server"
+LABEL description="Raspberry Pi 3B+ optimized motion detection streaming server with Debian Trixie"
 LABEL architecture="armv7l"
 
 # Update package lists and install system dependencies

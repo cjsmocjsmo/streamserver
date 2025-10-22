@@ -1,0 +1,31 @@
+[Unit]
+Description=Raspberry Pi MJPEG Stream Server
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=picam
+Group=picam
+WorkingDirectory=/home/picam/Desktop/streamserver
+ExecStart=/usr/bin/python3 /home/picam/Desktop/streamserver/streamserver.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables
+Environment=PYTHONUNBUFFERED=1
+
+# Security settings
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+# Resource limits
+LimitNOFILE=1024
+
+# Camera access permissions
+SupplementaryGroups=video
+
+[Install]
+WantedBy=multi-user.target

@@ -26,19 +26,19 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y \
     # Network and web server
     curl \
     wget \
-    # Additional media libraries (Debian Trixie names)
-    libavcodec59 \
-    libavformat59 \
-    libavutil57 \
-    libswscale6 \
-    libswresample4 \
+    # Additional media libraries (correct Debian Trixie names)
+    libavcodec60 \
+    libavformat60 \
+    libavutil58 \
+    libswscale7 \
+    libswresample4t64 \
     # Math libraries
     liblapack3 \
     libblas3 \
     libatlas3-base \
-    # Image processing support
+    # Image processing support (with t64 naming)
     libjpeg62-turbo \
-    libpng16-16 \
+    libpng16-16t64 \
     libtiff6 \
     # Cleanup
     && rm -rf /var/lib/apt/lists/* \

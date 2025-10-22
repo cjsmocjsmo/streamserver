@@ -74,11 +74,6 @@ PAGE = """\
         <span class="recording-status" id="recording-status">Standby</span>
     </div>
 </div>
-<div class="info-panel">
-    <div class="feature">OpenCV Motion Detection</div>
-    <div class="feature">10sec Pre/Post Recording</div>
-    <div class="feature">Auto-Save with Timestamp</div>
-</div>
 <div class="camera">
     <img src="stream.mjpg" width="640" height="480" />
 </div>

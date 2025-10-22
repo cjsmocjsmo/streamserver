@@ -422,7 +422,17 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=FRAME')
             self.end_headers()
             self.handle_streaming_client()
+        elif self.path == '/favicon.ico':
+            # Return empty favicon to prevent 404 errors
+            self.send_response(204)  # No Content
+            self.end_headers()
+        elif self.path.startswith('/apple-touch-icon') or self.path.endswith('.png') or self.path.endswith('.ico'):
+            # Handle common mobile/browser icon requests
+            self.send_response(204)  # No Content
+            self.end_headers()
         else:
+            # Log unknown requests for debugging
+            logging.debug(f"404 request from {self.client_address}: {self.path}")
             self.send_error(404)
             self.end_headers()
 

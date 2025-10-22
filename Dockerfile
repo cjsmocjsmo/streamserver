@@ -15,48 +15,39 @@ LABEL architecture="armv7l"
 
 # Update package lists and install system dependencies
 RUN apt-get update && apt-get upgrade -y && apt-get install -y \
-    # Core Python and development tools
+    # Core Python runtime (no dev packages needed)
     python3 \
-    python3-dev \
     python3-setuptools \
     python3-distutils \
-    # OpenCV and computer vision (Debian packages first)
+    # OpenCV and computer vision (runtime packages only)
     python3-opencv \
-    libopencv-dev \
-    libopencv-contrib-dev \
     python3-numpy \
     # Camera support for Pi 3B+
     python3-picamera \
     python3-picamera2 \
-    libcamera-dev \
     libcamera-tools \
     libcamera-apps \
     # Video4Linux and camera utilities
     v4l-utils \
-    libv4l-dev \
-    # GPU and hardware acceleration for Pi 3B+
+    # GPU and hardware acceleration for Pi 3B+ (runtime only)
     libraspberrypi-bin \
-    libraspberrypi-dev \
     libraspberrypi0 \
-    # Additional media libraries (Debian packages)
+    # Additional media libraries (runtime packages)
     libavcodec58 \
     libavformat58 \
     libavutil56 \
     libswscale5 \
     libswresample3 \
-    # Math and optimization libraries
-    libatlas-base-dev \
+    # Math and optimization libraries (runtime only)
     liblapack3 \
     libblas3 \
-    # Image processing support
-    libjpeg62-turbo-dev \
+    # Image processing support (runtime only)
+    libjpeg62-turbo \
     libpng16-16 \
-    libtiff5-dev \
+    libtiff5 \
     # Network and web server
     curl \
     wget \
-    # Only install pip3 as last resort for missing packages
-    python3-pip \
     # Cleanup
     && rm -rf /var/lib/apt/lists/* \
     && apt-get autoremove -y \

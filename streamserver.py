@@ -192,12 +192,12 @@ class MotionDetector:
     def __init__(self, threshold=25, min_area=1000, learning_rate=0.001):
         self.threshold = threshold
         self.min_area = min_area
+        self.learning_rate = learning_rate
         self.background_subtractor = cv2.createBackgroundSubtractorMOG2(
             detectShadows=True, 
             varThreshold=50, 
             history=500
         )
-        self.background_subtractor.setLearningRate(learning_rate)
         self.motion_detected = False
         self.last_motion_time = 0
         
@@ -206,8 +206,8 @@ class MotionDetector:
         if frame is None:
             return False
             
-        # Apply background subtraction
-        fg_mask = self.background_subtractor.apply(frame)
+        # Apply background subtraction with learning rate
+        fg_mask = self.background_subtractor.apply(frame, learningRate=self.learning_rate)
         
         # Remove noise with morphological operations
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))

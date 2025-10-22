@@ -32,7 +32,7 @@ RUN rm -rf /var/lib/apt/lists/* \
 WORKDIR /app
 
 # Create non-root user with video group access
-RUN useradd -m -u 1000 -G video,gpio streamuser && \
+RUN useradd -m -u 1000 -G video streamuser && \
     mkdir -p /app/recordings /app/logs && \
     chown -R streamuser:streamuser /app
 

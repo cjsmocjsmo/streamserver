@@ -21,11 +21,10 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y \
     python3-opencv \
     python3-numpy \
     # Camera and video utilities (essential for camera access)
-    v4l-utils \
+    v4l-utils 
     # Health check utility (essential for Docker health checks)
-    curl \
-    # Cleanup
-    && rm -rf /var/lib/apt/lists/* \
+    
+RUN rm -rf /var/lib/apt/lists/* \
     && apt-get autoremove -y \
     && apt-get autoclean
 

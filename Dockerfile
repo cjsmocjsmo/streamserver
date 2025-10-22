@@ -15,31 +15,15 @@ LABEL architecture="armv7l"
 
 # Update package lists and install system dependencies
 RUN apt-get update && apt-get upgrade -y && apt-get install -y \
-    # Core Python runtime
+    # Core Python runtime (essential)
     python3 \
-    python3-setuptools \
-    # OpenCV and computer vision (Debian Trixie packages)
+    # OpenCV and computer vision (essential for motion detection)
     python3-opencv \
     python3-numpy \
-    # Camera and video utilities (generic Linux)
+    # Camera and video utilities (essential for camera access)
     v4l-utils \
-    # Network and web server
+    # Health check utility (essential for Docker health checks)
     curl \
-    wget \
-    # Additional media libraries (correct Debian Trixie names)
-    libavcodec60 \
-    libavformat60 \
-    libavutil58 \
-    libswscale7 \
-    libswresample4t64 \
-    # Math libraries
-    liblapack3 \
-    libblas3 \
-    libatlas3-base \
-    # Image processing support (with t64 naming)
-    libjpeg62-turbo \
-    libpng16-16t64 \
-    libtiff6 \
     # Cleanup
     && rm -rf /var/lib/apt/lists/* \
     && apt-get autoremove -y \

@@ -338,21 +338,49 @@ class MotionStreamingOutput(StreamingOutput):
         self.circular_buffer = circular_buffer
         self.frame_count = 0
         self.motion_status = "No Motion"
+        self.motion_processing_active = True
+        self.latest_frame_for_processing = None
+        
+        # Start motion processing thread
+        self.motion_thread = threading.Thread(target=self._motion_processing_loop, daemon=True)
+        self.motion_thread.start()
         
     def write(self, buf):
         with self.condition:
             self.frame = buf
             self.last_frame_time = time.time()
             
-            # Process frame for motion detection every few frames to save CPU
+            # Store frame for motion processing without blocking streaming
             self.frame_count += 1
-            if self.frame_count % 3 == 0:  # Process every 3rd frame
-                self._process_frame_for_motion(buf)
+            if self.frame_count % 5 == 0:  # Process every 5th frame (reduced from 3)
+                self.latest_frame_for_processing = buf
                 
             self.condition.notify_all()
             
+    def _motion_processing_loop(self):
+        """Separate thread for motion detection processing"""
+        while self.motion_processing_active:
+            try:
+                if self.latest_frame_for_processing is not None:
+                    # Process the latest frame
+                    frame_buf = self.latest_frame_for_processing
+                    self.latest_frame_for_processing = None
+                    
+                    self._process_frame_for_motion(frame_buf)
+                
+                # Small delay to prevent excessive CPU usage
+                time.sleep(0.1)  # Process at most 10 times per second
+                
+            except Exception as e:
+                logging.error(f"Motion processing error: {e}")
+                time.sleep(0.5)  # Longer delay on error
+                
+    def stop_motion_processing(self):
+        """Stop the motion processing thread"""
+        self.motion_processing_active = False
+            
     def _process_frame_for_motion(self, jpeg_buf):
-        """Process JPEG buffer for motion detection and recording"""
+        """Process JPEG buffer for motion detection and recording (non-blocking)"""
         try:
             # Convert JPEG buffer to OpenCV frame
             nparr = np.frombuffer(jpeg_buf, np.uint8)
@@ -593,6 +621,8 @@ def run_stream_server():
                     server.serve_forever()
                 finally:
                     watchdog.stop()
+                    # Stop motion processing thread
+                    output.stop_motion_processing()
                     # Stop any ongoing recording
                     if video_recorder.is_recording:
                         video_recorder.stop_recording()

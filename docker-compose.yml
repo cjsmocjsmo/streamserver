@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   motion-detection-pi3b:

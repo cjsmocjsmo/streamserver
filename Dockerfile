@@ -44,12 +44,9 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y \
     # Image processing support (runtime only)
     libjpeg62-turbo \
     libpng16-16 \
-    libtiff5 \
-    # Network and web server
-    curl \
-    wget \
-    # Cleanup
-    && rm -rf /var/lib/apt/lists/* \
+    libtiff5
+    
+RUN rm -rf /var/lib/apt/lists/* \
     && apt-get autoremove -y \
     && apt-get autoclean
 

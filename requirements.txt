@@ -1,0 +1,4 @@
+# Requirements for OpenCV Motion Detection Stream Server
+opencv-python==4.8.1.78
+numpy>=1.21.0
+picamera2

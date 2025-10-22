@@ -3,11 +3,16 @@ import logging
 import socketserver
 import time
 import threading
+import os
+from datetime import datetime
+from collections import deque
 from threading import Condition
 from http import server
 
+import cv2
+import numpy as np
 from picamera2 import Picamera2
-from picamera2.encoders import JpegEncoder
+from picamera2.encoders import JpegEncoder, H264Encoder
 from picamera2.outputs import FileOutput
 
 # Configure logging
@@ -16,27 +21,103 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 PAGE = """\
 <html>
 <head>
-<title>Raspberry Pi MJPEG Stream</title>
+<title>Raspberry Pi Motion Detection Stream</title>
+<meta http-equiv="refresh" content="30">
 </head>
 <body>
-<h1>Raspberry Pi MJPEG Stream</h1>
+<h1>🎥 Motion Detection Stream</h1>
+<div class="info">
+    <div class="status">
+        <span class="status-label">Status:</span>
+        <span class="status-active">● ACTIVE</span>
+    </div>
+    <div class="features">
+        <div class="feature">🔍 Motion Detection Enabled</div>
+        <div class="feature">📹 Auto Recording on Motion</div>
+        <div class="feature">⏱️ 5sec Pre-buffer</div>
+    </div>
+</div>
 <div class="camera">
     <img src="stream.mjpg" width="640" height="480" />
 </div>
+<div class="controls">
+    <p>Recordings are automatically saved when motion is detected</p>
+    <p>Check the 'recordings' directory for saved videos</p>
+</div>
 </body>
-</html>
 <style>
     body {
-        background:black;
+        background: #1a1a1a;
+        color: #ffffff;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        margin: 0;
+        padding: 20px;
     }
     h1 {
         text-align: center;
-        color: green;
+        color: #00ff88;
+        margin-bottom: 20px;
+        text-shadow: 0 0 10px rgba(0, 255, 136, 0.3);
+    }
+    .info {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: #2a2a2a;
+        padding: 15px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+        border: 1px solid #00ff88;
+    }
+    .status {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .status-label {
+        font-weight: bold;
+    }
+    .status-active {
+        color: #00ff88;
+        font-weight: bold;
+        animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
+    }
+    .features {
+        display: flex;
+        gap: 15px;
+    }
+    .feature {
+        background: #333;
+        padding: 5px 10px;
+        border-radius: 5px;
+        font-size: 0.9em;
     }
     .camera {
         display: flex;
         justify-content: center;
         align-items: center;
+        background: #000;
+        padding: 10px;
+        border-radius: 10px;
+        border: 2px solid #00ff88;
+        box-shadow: 0 0 20px rgba(0, 255, 136, 0.2);
+    }
+    .camera img {
+        border-radius: 5px;
+    }
+    .controls {
+        text-align: center;
+        margin-top: 20px;
+        color: #ccc;
+    }
+    .controls p {
+        margin: 5px 0;
+    }
 </style>
 </html>"""
 
@@ -51,6 +132,185 @@ class StreamingOutput(io.BufferedIOBase):
             self.frame = buf
             self.last_frame_time = time.time()
             self.condition.notify_all()
+
+class MotionDetector:
+    def __init__(self, threshold=25, min_area=500, blur_size=21):
+        self.threshold = threshold
+        self.min_area = min_area
+        self.blur_size = blur_size
+        self.background_subtractor = cv2.createBackgroundSubtractorMOG2(
+            detectShadows=True, varThreshold=50, history=500
+        )
+        self.motion_detected = False
+        self.last_motion_time = 0
+        
+    def detect_motion(self, frame):
+        """Detect motion in the given frame"""
+        if frame is None:
+            return False
+            
+        # Apply background subtraction
+        fg_mask = self.background_subtractor.apply(frame)
+        
+        # Remove noise with morphological operations
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
+        
+        # Find contours
+        contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Check if any contour is large enough to be considered motion
+        motion_detected = False
+        for contour in contours:
+            if cv2.contourArea(contour) > self.min_area:
+                motion_detected = True
+                break
+                
+        if motion_detected:
+            self.last_motion_time = time.time()
+            
+        self.motion_detected = motion_detected
+        return motion_detected
+
+class CircularVideoBuffer:
+    def __init__(self, max_duration=5, fps=30):
+        self.max_frames = int(max_duration * fps)
+        self.buffer = deque(maxlen=self.max_frames)
+        self.fps = fps
+        
+    def add_frame(self, frame):
+        """Add a frame to the circular buffer"""
+        self.buffer.append((frame.copy(), time.time()))
+        
+    def get_prebuffer_frames(self):
+        """Get all frames currently in the buffer"""
+        return list(self.buffer)
+        
+    def clear(self):
+        """Clear the buffer"""
+        self.buffer.clear()
+
+class VideoRecorder:
+    def __init__(self, output_dir="recordings"):
+        self.output_dir = output_dir
+        self.is_recording = False
+        self.current_writer = None
+        self.current_filename = None
+        self.recording_start_time = None
+        
+        # Create output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
+        
+    def start_recording(self, prebuffer_frames, frame_size, fps=30):
+        """Start recording with prebuffer frames"""
+        if self.is_recording:
+            return
+            
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.current_filename = os.path.join(self.output_dir, f"motion_{timestamp}.mp4")
+        
+        # Initialize video writer
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        self.current_writer = cv2.VideoWriter(
+            self.current_filename, fourcc, fps, frame_size
+        )
+        
+        if not self.current_writer.isOpened():
+            logging.error(f"Failed to open video writer for {self.current_filename}")
+            return
+            
+        # Write prebuffer frames first
+        for frame, _ in prebuffer_frames:
+            if frame is not None:
+                self.current_writer.write(frame)
+                
+        self.is_recording = True
+        self.recording_start_time = time.time()
+        logging.info(f"Started recording: {self.current_filename}")
+        
+    def write_frame(self, frame):
+        """Write a frame to the current recording"""
+        if self.is_recording and self.current_writer:
+            self.current_writer.write(frame)
+            
+    def stop_recording(self):
+        """Stop the current recording"""
+        if not self.is_recording:
+            return
+            
+        if self.current_writer:
+            self.current_writer.release()
+            self.current_writer = None
+            
+        duration = time.time() - self.recording_start_time if self.recording_start_time else 0
+        logging.info(f"Stopped recording: {self.current_filename} (Duration: {duration:.1f}s)")
+        
+        self.is_recording = False
+        self.current_filename = None
+        self.recording_start_time = None
+
+class MotionStreamingOutput(StreamingOutput):
+    def __init__(self, motion_detector, video_recorder, circular_buffer):
+        super().__init__()
+        self.motion_detector = motion_detector
+        self.video_recorder = video_recorder
+        self.circular_buffer = circular_buffer
+        self.motion_timeout = 5.0  # Stop recording after 5 seconds of no motion
+        self.frame_count = 0
+        
+    def write(self, buf):
+        with self.condition:
+            self.frame = buf
+            self.last_frame_time = time.time()
+            
+            # Process frame for motion detection every few frames to save CPU
+            self.frame_count += 1
+            if self.frame_count % 3 == 0:  # Process every 3rd frame
+                self._process_frame_for_motion(buf)
+                
+            self.condition.notify_all()
+            
+    def _process_frame_for_motion(self, jpeg_buf):
+        """Process JPEG buffer for motion detection and recording"""
+        try:
+            # Convert JPEG buffer to OpenCV frame
+            nparr = np.frombuffer(jpeg_buf, np.uint8)
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            if frame is None:
+                return
+                
+            # Add frame to circular buffer
+            self.circular_buffer.add_frame(frame)
+            
+            # Detect motion
+            motion_detected = self.motion_detector.detect_motion(frame)
+            
+            current_time = time.time()
+            
+            if motion_detected:
+                # Start recording if not already recording
+                if not self.video_recorder.is_recording:
+                    prebuffer_frames = self.circular_buffer.get_prebuffer_frames()
+                    frame_size = (frame.shape[1], frame.shape[0])
+                    self.video_recorder.start_recording(prebuffer_frames, frame_size)
+                    
+                # Write current frame to recording
+                if self.video_recorder.is_recording:
+                    self.video_recorder.write_frame(frame)
+                    
+            else:
+                # Check if we should stop recording (no motion for timeout period)
+                if (self.video_recorder.is_recording and 
+                    current_time - self.motion_detector.last_motion_time > self.motion_timeout):
+                    self.video_recorder.stop_recording()
+                    
+                # Continue writing frames for a bit after motion stops
+                elif self.video_recorder.is_recording:
+                    self.video_recorder.write_frame(frame)
+                    
+        except Exception as e:
+            logging.error(f"Error processing frame for motion detection: {e}")
 
 class StreamWatchdog:
     def __init__(self, timeout=10):
@@ -192,22 +452,34 @@ def monitor_stream_health(watchdog, picam2, output):
                 consecutive_failures = 0
 
 def run_stream_server():
-    """Main server loop with recovery"""
+    """Main server loop with recovery and motion detection"""
     restart_count = 0
     
     while True:
         try:
             restart_count += 1
-            logging.info(f"Starting stream server (attempt #{restart_count})")
+            logging.info(f"Starting stream server with motion detection (attempt #{restart_count})")
             
             # Initialize camera
             picam2 = initialize_camera()
             
             try:
-                # Create output and watchdog
+                # Create motion detection components
+                motion_detector = MotionDetector(threshold=25, min_area=500)
+                video_recorder = VideoRecorder("recordings")
+                circular_buffer = CircularVideoBuffer(max_duration=5, fps=30)
+                
+                # Create motion-aware output
                 global output
-                output = StreamingOutput()
+                output = MotionStreamingOutput(motion_detector, video_recorder, circular_buffer)
                 watchdog = StreamWatchdog()
+                
+                logging.info("Motion detection system initialized")
+                logging.info("- Motion threshold: 25")
+                logging.info("- Minimum area: 500 pixels")
+                logging.info("- Pre-record buffer: 5 seconds")
+                logging.info("- Post-motion timeout: 5 seconds")
+                logging.info(f"- Recording directory: {video_recorder.output_dir}")
                 
                 # Start recording
                 if not start_recording_with_recovery(picam2, output):
@@ -225,11 +497,15 @@ def run_stream_server():
                 address = ('', 8000)
                 server = StreamingServer(address, StreamingHandler)
                 logging.info(f"Server started on http://localhost:8000")
+                logging.info("Motion detection is active - recordings will be saved when motion is detected")
                 
                 try:
                     server.serve_forever()
                 finally:
                     watchdog.stop()
+                    # Stop any ongoing recording
+                    if video_recorder.is_recording:
+                        video_recorder.stop_recording()
                     server.shutdown()
                     
             finally:

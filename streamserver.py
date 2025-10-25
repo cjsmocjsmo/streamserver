@@ -455,12 +455,28 @@ def start_recording_with_recovery(picam2, output):
         bool: True if recording started successfully
     """
     try:
-        picam2.start_recording(output)
+        if output is None:
+            logger.error("❌ Output is None - cannot start recording")
+            return False
+        
+        logger.info(f"🔧 Starting recording with output: {type(output)}")
+        # Try with encoder parameter
+        from picamera2.encoders import MJPEGEncoder
+        encoder = MJPEGEncoder()
+        picam2.start_recording(encoder, output)
         logger.info("✅ Camera recording started")
         return True
     except Exception as e:
         logger.error(f"❌ Failed to start recording: {e}")
-        return False
+        # Try fallback without encoder
+        try:
+            logger.info("🔄 Trying fallback method...")
+            picam2.start_recording(output)
+            logger.info("✅ Camera recording started (fallback)")
+            return True
+        except Exception as e2:
+            logger.error(f"❌ Fallback also failed: {e2}")
+            return False
 
 
 def monitor_stream_health(watchdog, picam2, output):
@@ -520,7 +536,12 @@ def run_stream_server():
             
             try:
                 # Initialize motion detection output
-                output = MotionStreamingOutput(config)
+                try:
+                    output = MotionStreamingOutput(config)
+                    logger.info(f"🔧 Created output object: {type(output)}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to create output object: {e}")
+                    raise StreamServerError(f"Failed to create output object: {e}")
                 
                 # Initialize stream watchdog
                 watchdog = StreamWatchdog()
@@ -537,6 +558,7 @@ def run_stream_server():
                 logger.info(f"   - Video format: motion_YYYYMMDD_HHMMSS.mp4")
                 
                 # Start recording
+                logger.info(f"🔧 About to start recording with output: {output}")
                 if not start_recording_with_recovery(picam2, output):
                     raise StreamServerError("Failed to start recording")
                 

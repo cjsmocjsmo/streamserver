@@ -1,11 +1,11 @@
-# Core dependencies
+# Core dependencies (prefer apt packages when available)
+# Install via apt: sudo apt install python3-opencv python3-numpy python3-picamera2
+# Fallback pip packages below:
+
 opencv-python>=4.8.0
 numpy>=1.24.0
 
-# Raspberry Pi camera (install via apt on Raspberry Pi)
-# picamera2 - install with: sudo apt install python3-picamera2
-
-# Development dependencies (optional)
+# Development dependencies (pip only)
 pytest>=7.0.0
 black>=23.0.0
 flake8>=6.0.0

@@ -17,7 +17,6 @@ A professional-grade video streaming server with real-time motion detection capa
 
 ### Prerequisites
 - Raspberry Pi with camera module
-- Python 3.8 or higher
 - Raspberry Pi OS (recommended)
 
 ### Installation
@@ -28,11 +27,19 @@ A professional-grade video streaming server with real-time motion detection capa
    cd streamserver
    python3 setup.py
    ```
+   
+   The setup script will automatically:
+   - Install system packages via `apt` (python3-opencv, python3-numpy, python3-picamera2)
+   - Fall back to `pip` for packages not available in Debian repositories
 
-2. **Install Picamera2 (Raspberry Pi only):**
+2. **Manual installation (alternative):**
    ```bash
+   # Prefer apt packages
    sudo apt update
-   sudo apt install python3-picamera2
+   sudo apt install python3-opencv python3-numpy python3-picamera2
+   
+   # Install remaining packages via pip
+   pip3 install -r requirements.txt
    ```
 
 3. **Run the server:**

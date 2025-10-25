@@ -10,7 +10,16 @@ help:  ## Show this help message
 setup:  ## Setup the project (install dependencies and create directories)
 	python3 setup.py
 
-install:  ## Install Python dependencies
+install:  ## Install Python dependencies (prefer apt over pip)
+	@echo "Installing system packages via apt..."
+	@command -v apt >/dev/null 2>&1 && { \
+		sudo apt update && \
+		sudo apt install -y python3-opencv python3-numpy python3-picamera2; \
+	} || echo "APT not available, skipping system packages"
+	@echo "Installing remaining packages via pip..."
+	pip3 install -r requirements.txt
+
+install-pip-only:  ## Install all dependencies via pip only
 	pip3 install -r requirements.txt
 
 run:  ## Run the motion detection server

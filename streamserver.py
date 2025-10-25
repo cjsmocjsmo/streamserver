@@ -342,23 +342,6 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
 </head>
 <body>
     <div class="container">
-        <h1>🎥 Motion Detection Stream</h1>
-        
-        <div class="status-bar">
-            <div class="status-item">
-                <div class="status-label">Status</div>
-                <div class="status-value">🟢 Active</div>
-            </div>
-            <div class="status-item">
-                <div class="status-label">Motion</div>
-                <div class="status-value" id="motion-status">Monitoring</div>
-            </div>
-            <div class="status-item">
-                <div class="status-label">Recording</div>
-                <div class="status-value" id="recording-status">Standby</div>
-            </div>
-        </div>
-        
         <div class="camera-container">
             <img src="/stream.mjpg" class="camera" alt="Video Stream">
         </div>

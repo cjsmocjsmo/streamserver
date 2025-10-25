@@ -36,13 +36,15 @@ def install_system_packages():
     try:
         print("Installing system packages via apt...")
         subprocess.check_call(['sudo', 'apt', 'update'], 
-                            capture_output=True, text=True)
+                            stdout=subprocess.DEVNULL, 
+                            stderr=subprocess.DEVNULL)
         
         success = True
         for package in system_packages:
             try:
                 subprocess.check_call(['sudo', 'apt', 'install', '-y', package], 
-                                    capture_output=True, text=True)
+                                    stdout=subprocess.DEVNULL, 
+                                    stderr=subprocess.DEVNULL)
                 print(f"✓ Installed {package}")
             except subprocess.CalledProcessError:
                 print(f"✗ Could not install {package} via apt")

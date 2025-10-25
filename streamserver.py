@@ -43,6 +43,7 @@ class StreamingOutput(io.BufferedIOBase):
     
     def __init__(self):
         """Initialize streaming output."""
+        super().__init__()
         self.frame = None
         self.condition = Condition()
         self.last_frame_time = time.time()
@@ -444,39 +445,51 @@ def initialize_camera(config):
         raise CameraError(f"Failed to initialize camera: {e}")
 
 
-def start_recording_with_recovery(picam2, output):
-    """Start recording with error recovery.
+def start_camera_with_recovery(picam2, output):
+    """Start camera with error recovery.
     
     Args:
         picam2: Camera instance
-        output: Streaming output
+        output: Streaming output (not used with start() method)
         
     Returns:
-        bool: True if recording started successfully
+        bool: True if camera started successfully
     """
     try:
         if output is None:
-            logger.error("❌ Output is None - cannot start recording")
+            logger.error("❌ Output is None - cannot start camera")
             return False
         
-        logger.info(f"🔧 Starting recording with output: {type(output)}")
-        # Try with encoder parameter
-        from picamera2.encoders import MJPEGEncoder
-        encoder = MJPEGEncoder()
-        picam2.start_recording(encoder, output)
-        logger.info("✅ Camera recording started")
+        logger.info(f"🔧 Starting camera with output: {type(output)}")
+        # Start camera for streaming
+        picam2.start()
+        
+        # Start frame capture thread to feed our output
+        def capture_frames():
+            """Capture frames and send to output."""
+            while True:
+                try:
+                    # Capture JPEG frame
+                    frame_data = picam2.capture_array("main")
+                    if frame_data is not None:
+                        # Convert to JPEG
+                        _, jpeg_data = cv2.imencode('.jpg', frame_data)
+                        # Send to our output
+                        output.write(jpeg_data.tobytes())
+                    time.sleep(1/30)  # 30 FPS
+                except Exception as e:
+                    logger.error(f"Frame capture error: {e}")
+                    break
+        
+        # Start capture thread
+        capture_thread = threading.Thread(target=capture_frames, daemon=True)
+        capture_thread.start()
+        
+        logger.info("✅ Camera started successfully")
         return True
     except Exception as e:
-        logger.error(f"❌ Failed to start recording: {e}")
-        # Try fallback without encoder
-        try:
-            logger.info("🔄 Trying fallback method...")
-            picam2.start_recording(output)
-            logger.info("✅ Camera recording started (fallback)")
-            return True
-        except Exception as e2:
-            logger.error(f"❌ Fallback also failed: {e2}")
-            return False
+        logger.error(f"❌ Failed to start camera: {e}")
+        return False
 
 
 def monitor_stream_health(watchdog, picam2, output):
@@ -501,7 +514,7 @@ def monitor_stream_health(watchdog, picam2, output):
                 picam2.stop_recording()
                 time.sleep(1)
                 
-                if start_recording_with_recovery(picam2, output):
+                if start_camera_with_recovery(picam2, output):
                     logger.info("✅ Stream recovery successful")
                     consecutive_failures = 0
                 else:
@@ -559,7 +572,7 @@ def run_stream_server():
                 
                 # Start recording
                 logger.info(f"🔧 About to start recording with output: {output}")
-                if not start_recording_with_recovery(picam2, output):
+                if not start_camera_with_recovery(picam2, output):
                     raise StreamServerError("Failed to start recording")
                 
                 # Start health monitoring in separate thread

@@ -18,10 +18,14 @@ def has_apt():
 
 
 def install_system_packages():
-    """Install system packages via apt if available."""
+    """Install system packages via apt."""
     if not has_apt():
-        print("� APT not available, skipping system package installation")
-        return
+        print("Error: APT not available, cannot install system packages")
+        print("Please install packages manually:")
+        print("  - python3-opencv")
+        print("  - python3-numpy") 
+        print("  - python3-picamera2")
+        return False
         
     system_packages = [
         'python3-opencv',
@@ -30,60 +34,54 @@ def install_system_packages():
     ]
     
     try:
-        print("📦 Installing system packages via apt...")
+        print("Installing system packages via apt...")
         subprocess.check_call(['sudo', 'apt', 'update'], 
                             capture_output=True, text=True)
         
+        success = True
         for package in system_packages:
             try:
                 subprocess.check_call(['sudo', 'apt', 'install', '-y', package], 
                                     capture_output=True, text=True)
-                print(f"✅ Installed {package}")
+                print(f"✓ Installed {package}")
             except subprocess.CalledProcessError:
-                print(f"⚠️ Could not install {package} via apt")
+                print(f"✗ Could not install {package} via apt")
+                success = False
                 
+        return success
+        
     except subprocess.CalledProcessError as e:
-        print(f"⚠️ APT update failed: {e}")
-
-
-def install_pip_fallbacks():
-    """Install packages via pip that weren't available via apt."""
-    requirements_file = Path(__file__).parent / "requirements.txt"
-    if requirements_file.exists():
-        print("📦 Installing remaining dependencies via pip...")
-        try:
-            subprocess.check_call([
-                sys.executable, "-m", "pip", "install", "-r", str(requirements_file)
-            ])
-            print("✅ Pip dependencies installed successfully")
-        except subprocess.CalledProcessError as e:
-            print(f"❌ Failed to install pip dependencies: {e}")
+        print(f"Error: APT update failed: {e}")
+        return False
 
 
 def main():
     """Install dependencies and setup the project."""
-    print("🚀 Setting up Motion Detection Stream Server...")
+    print("Setting up Motion Detection Stream Server...")
     
-    print(f"✅ Using Python {sys.version_info.major}.{sys.version_info.minor}")
+    print(f"✓ Using Python {sys.version_info.major}.{sys.version_info.minor}")
     
-    # Install system packages first (preferred)
-    install_system_packages()
-    
-    # Install any remaining packages via pip
-    install_pip_fallbacks()
+    # Install system packages (apt only - no pip fallback)
+    if not install_system_packages():
+        print("\nWarning: Some packages could not be installed automatically.")
+        print("Please run these commands manually:")
+        print("  sudo apt update")
+        print("  sudo apt install python3-opencv python3-numpy python3-picamera2")
     
     # Create necessary directories
     directories = ["recordings", "logs"]
     for directory in directories:
         Path(directory).mkdir(exist_ok=True)
-        print(f"📁 Created directory: {directory}")
+        print(f"Created directory: {directory}")
     
-    print("\n🎉 Setup complete!")
-    print("\n📋 Next steps:")
+    print("\nSetup complete!")
+    print("\nNext steps:")
     print("1. Run the server:")
-    print("   python3 streamserver_v2.py")
+    print("   python3 streamserver.py")
     print("\n2. Open your browser to:")
     print("   http://localhost:8000")
+    print("\nNote: This project uses APT packages only (no pip/virtual env needed)")
+    print("This complies with PEP 668 externally-managed-environment restrictions.")
 
 
 if __name__ == "__main__":

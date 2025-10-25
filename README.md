@@ -21,7 +21,9 @@ A professional-grade video streaming server with real-time motion detection capa
 
 ### Installation
 
-1. **Clone and setup:**
+**Important**: This project uses APT packages only to comply with PEP 668 (externally-managed-environment) on modern Debian/Ubuntu systems.
+
+1. **Automated setup (recommended):**
    ```bash
    git clone <your-repo>
    cd streamserver
@@ -29,22 +31,22 @@ A professional-grade video streaming server with real-time motion detection capa
    ```
    
    The setup script will automatically:
-   - Install system packages via `apt` (python3-opencv, python3-numpy, python3-picamera2)
-   - Fall back to `pip` for packages not available in Debian repositories
+   - Install all required packages via `apt` (python3-opencv, python3-numpy, python3-picamera2)
+   - Create necessary directories
+   - Provide clear error messages if packages cannot be installed
 
-2. **Manual installation (alternative):**
+2. **Manual installation (if needed):**
    ```bash
-   # Prefer apt packages
+   # Install all dependencies via apt
    sudo apt update
    sudo apt install python3-opencv python3-numpy python3-picamera2
-   
-   # Install remaining packages via pip
-   pip3 install -r requirements.txt
    ```
+
+**Note**: This project deliberately avoids pip installation to comply with PEP 668 externally-managed-environment restrictions on modern systems. All required packages are available in Debian/Ubuntu repositories.
 
 3. **Run the server:**
    ```bash
-   python3 streamserver_v2.py
+   python3 streamserver.py
    ```
 
 4. **Access the web interface:**
@@ -54,8 +56,7 @@ A professional-grade video streaming server with real-time motion detection capa
 
 ```
 streamserver/
-├── streamserver_v2.py      # Main application (improved)
-├── streamserver.py         # Original version
+├── streamserver.py         # Main application
 ├── config.py              # Configuration management
 ├── database.py            # SQLite event database
 ├── motion_detector.py     # OpenCV motion detection

@@ -9,8 +9,8 @@ import os
 def check_and_install_packages():
     """Check if required packages are installed, install if missing."""
     required_packages = {
-        'cv2': {'apt': 'python3-opencv', 'pip': 'opencv-python'},
-        'numpy': {'apt': 'python3-numpy', 'pip': 'numpy'}
+        'cv2': {'apt': 'python3-opencv'},
+        'numpy': {'apt': 'python3-numpy'}
     }
     
     missing_packages = []
@@ -60,37 +60,15 @@ def _install_with_apt(apt_package):
         logging.info(f"✅ Successfully installed {apt_package} via apt")
         return True
     except subprocess.CalledProcessError as e:
-        logging.warning(f"⚠️ Failed to install {apt_package} via apt: {e}")
-        return False
-
-
-def _install_with_pip(pip_package):
-    """Install package using pip.
-    
-    Args:
-        pip_package: pip package name to install
-        
-    Returns:
-        bool: True if installation succeeded
-    """
-    try:
-        logging.info(f"Installing {pip_package} via pip...")
-        subprocess.check_call([
-            sys.executable, '-m', 'pip', 'install', pip_package
-        ], capture_output=True, text=True)
-        
-        logging.info(f"✅ Successfully installed {pip_package} via pip")
-        return True
-    except subprocess.CalledProcessError as e:
-        logging.error(f"❌ Failed to install {pip_package} via pip: {e}")
+        logging.error(f"❌ Failed to install {apt_package} via apt: {e}")
         return False
 
 
 def _install_packages(packages):
-    """Install missing packages, preferring apt over pip.
+    """Install missing packages using apt only.
     
     Args:
-        packages: List of package info dictionaries with 'apt' and 'pip' keys
+        packages: List of package info dictionaries with 'apt' keys
         
     Raises:
         SystemExit: If package installation fails
@@ -98,21 +76,22 @@ def _install_packages(packages):
     logging.info("Installing missing packages...")
     has_apt = _has_apt()
     
+    if not has_apt:
+        logging.error("❌ APT package manager not available")
+        logging.error("❌ Cannot install required packages")
+        logging.error("Please install packages manually:")
+        for package_info in packages:
+            logging.error(f"   - {package_info['apt']}")
+        sys.exit(1)
+    
     for package_info in packages:
         apt_package = package_info['apt']
-        pip_package = package_info['pip']
         
-        installed = False
-        
-        # Try apt first if available
-        if has_apt:
-            installed = _install_with_apt(apt_package)
-        
-        # Fall back to pip if apt failed or unavailable
-        if not installed:
-            if not _install_with_pip(pip_package):
-                logging.error(f"❌ Failed to install {pip_package} with both apt and pip")
-                sys.exit(1)
+        if not _install_with_apt(apt_package):
+            logging.error(f"❌ Failed to install {apt_package}")
+            logging.error("Please install manually:")
+            logging.error(f"   sudo apt install {apt_package}")
+            sys.exit(1)
 
 
 def verify_picamera2():

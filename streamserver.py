@@ -455,7 +455,7 @@ def start_recording_with_recovery(picam2, output):
         bool: True if recording started successfully
     """
     try:
-        picam2.start_recording(output, format='mjpeg')
+        picam2.start_recording(output)
         logger.info("✅ Camera recording started")
         return True
     except Exception as e:

@@ -324,12 +324,12 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
         }}
         .footer {{
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             align-items: center;
             justify-content: center;
             margin-top: 30px;
             opacity: 0.7;
-            gap: 10px;
+            gap: 15px;
             background: rgba(0,0,0,0.2);
             border-radius: 8px;
             padding: 15px;

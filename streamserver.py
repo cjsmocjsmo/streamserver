@@ -186,8 +186,9 @@ class MotionStreamingOutput(StreamingOutput):
 class StreamingHandler(server.BaseHTTPRequestHandler):
     """HTTP handler for video streaming."""
     
-    # Class variable to store output instance for database access
+    # Class variables to store instances for access
     output_instance = None
+    watchdog_instance = None
     
     def do_GET(self):
         """Handle GET requests."""
@@ -254,8 +255,15 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                 event_count_24h = self.output_instance.database.get_event_count_24h()
                 total_event_count = self.output_instance.database.get_event_count()
             
-            # Create JSON response with both counts
-            json_data = f'{{"count24h": {event_count_24h}, "totalCount": {total_event_count}}}'
+            # Get stream health status
+            health_status = "Unknown"
+            if self.watchdog_instance and self.output_instance:
+                # Update health check
+                self.watchdog_instance.is_stream_healthy(self.output_instance)
+                health_status = self.watchdog_instance.get_health_status()
+            
+            # Create JSON response with counts and health status
+            json_data = f'{{"count24h": {event_count_24h}, "totalCount": {total_event_count}, "healthStatus": "{health_status}"}}'
             
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -319,6 +327,11 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             margin-top: 30px;
             opacity: 0.7;
         }}
+        .healthstatus {{
+            font-weight: bold;
+            font-size: 1.1em;
+            transition: color 0.3s ease;
+        }}
     </style>
 </head>
 <body>
@@ -328,6 +341,7 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
         </div>
         
         <div class="footer">
+            <p>Health: <span class="healthstatus"></span></p>
             <p>Events (24h): <span class="numbevents">{event_count}</span></p>
             <p>Total Events Recorded: <span class="totalevents">{total_event_count}</span></p>
         </div>
@@ -351,6 +365,20 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                     const totalCountElement = document.querySelector('.totalevents');
                     if (totalCountElement) {{
                         totalCountElement.textContent = data.totalCount;
+                    }}
+                    
+                    // Update health status
+                    const healthStatusElement = document.querySelector('.healthstatus');
+                    if (healthStatusElement) {{
+                        healthStatusElement.textContent = data.healthStatus;
+                        // Set color based on health status
+                        if (data.healthStatus === 'Healthy') {{
+                            healthStatusElement.style.color = 'green';
+                        }} else if (data.healthStatus === 'Unhealthy' || data.healthStatus === 'Stopped') {{
+                            healthStatusElement.style.color = 'red';
+                        }} else {{
+                            healthStatusElement.style.color = 'orange';
+                        }}
                     }}
                 }} else {{
                     console.error('Failed to fetch event count:', response.status);
@@ -395,6 +423,7 @@ class StreamWatchdog:
         """
         self.timeout = timeout
         self.is_running = True
+        self.current_health_status = "Healthy"  # Track current health status
         
     def is_stream_healthy(self, output):
         """Check if the stream is healthy.
@@ -406,14 +435,32 @@ class StreamWatchdog:
             bool: True if stream is healthy
         """
         if not self.is_running:
+            self.current_health_status = "Stopped"
             return False
             
         time_since_last_frame = time.time() - output.last_frame_time
-        return time_since_last_frame < self.timeout
+        is_healthy = time_since_last_frame < self.timeout
+        
+        # Update health status
+        if is_healthy:
+            self.current_health_status = "Healthy"
+        else:
+            self.current_health_status = "Unhealthy"
+            
+        return is_healthy
+        
+    def get_health_status(self):
+        """Get current health status string.
+        
+        Returns:
+            str: Current health status ("Healthy", "Unhealthy", or "Stopped")
+        """
+        return self.current_health_status
         
     def stop(self):
         """Stop the watchdog."""
         self.is_running = False
+        self.current_health_status = "Stopped"
 
 
 def initialize_camera(config):
@@ -587,8 +634,9 @@ def run_stream_server():
                 # Start HTTP server
                 address = (config.server.host, config.server.port)
                 
-                # Set output instance for database access in handler
+                # Set instances for web interface access
                 StreamingHandler.output_instance = output
+                StreamingHandler.watchdog_instance = watchdog
                 
                 server_instance = StreamingServer(address, StreamingHandler)
                 

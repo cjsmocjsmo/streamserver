@@ -247,13 +247,15 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
     def _serve_event_count_json(self):
         """Serve event count as JSON for AJAX requests."""
         try:
-            # Get event count from database (last 24 hours)
-            event_count = 0
+            # Get event counts from database
+            event_count_24h = 0
+            total_event_count = 0
             if self.output_instance and hasattr(self.output_instance, 'database'):
-                event_count = self.output_instance.database.get_event_count_24h()
+                event_count_24h = self.output_instance.database.get_event_count_24h()
+                total_event_count = self.output_instance.database.get_event_count()
             
-            # Create JSON response
-            json_data = f'{{"count": {event_count}}}'
+            # Create JSON response with both counts
+            json_data = f'{{"count24h": {event_count_24h}, "totalCount": {total_event_count}}}'
             
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -265,7 +267,7 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"❌ Error serving event count JSON: {e}")
             # Send error response
-            error_json = '{"count": 0, "error": "Failed to get count"}'
+            error_json = '{"count24h": 0, "totalCount": 0, "error": "Failed to get count"}'
             self.send_response(500)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', len(error_json))
@@ -274,10 +276,12 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
 
     def _get_html_content(self) -> bytes:
         """Get the HTML content for the main page."""
-        # Get event count from database (last 24 hours)
-        event_count = 0
+        # Get event counts from database
+        event_count = 0  # 24-hour count
+        total_event_count = 0  # Total count
         if self.output_instance and hasattr(self.output_instance, 'database'):
             event_count = self.output_instance.database.get_event_count_24h()
+            total_event_count = self.output_instance.database.get_event_count()
         
         html = f'''<!DOCTYPE html>
 <html>
@@ -324,8 +328,8 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
         </div>
         
         <div class="footer">
-            <p>Motion Detection Stream Server v2.0</p>
             <p>Events (24h): <span class="numbevents">{event_count}</span></p>
+            <p>Total Events Recorded: <span class="totalevents">{total_event_count}</span></p>
         </div>
     </div>
 
@@ -336,9 +340,17 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                 const response = await fetch('/api/events/count');
                 if (response.ok) {{
                     const data = await response.json();
-                    const countElement = document.querySelector('.numbevents');
-                    if (countElement) {{
-                        countElement.textContent = data.count;
+                    
+                    // Update 24-hour count
+                    const count24hElement = document.querySelector('.numbevents');
+                    if (count24hElement) {{
+                        count24hElement.textContent = data.count24h;
+                    }}
+                    
+                    // Update total count
+                    const totalCountElement = document.querySelector('.totalevents');
+                    if (totalCountElement) {{
+                        totalCountElement.textContent = data.totalCount;
                     }}
                 }} else {{
                     console.error('Failed to fetch event count:', response.status);

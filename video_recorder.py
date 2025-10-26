@@ -46,18 +46,6 @@ class CircularVideoBuffer:
             List of (frame, timestamp) tuples
         """
         return list(self.buffer)
-        
-    def clear(self):
-        """Clear the buffer."""
-        self.buffer.clear()
-        
-    def is_full(self):
-        """Check if buffer is at capacity.
-        
-        Returns:
-            bool: True if buffer is full
-        """
-        return len(self.buffer) == self.max_frames
 
 
 class VideoRecorder:

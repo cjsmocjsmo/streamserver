@@ -3,7 +3,6 @@
 import logging
 import subprocess
 import sys
-import os
 
 
 def check_and_install_packages():

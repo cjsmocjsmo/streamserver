@@ -78,29 +78,6 @@ class EventDatabase:
             logging.error(f"❌ Failed to add event to database: {e}")
             return False
             
-    def get_recent_events(self, limit=10):
-        """Get recent events from the database.
-        
-        Args:
-            limit: Maximum number of events to return
-            
-        Returns:
-            List of tuples containing event data
-        """
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    SELECT Epoch, Month, Day, Year, Size, Path 
-                    FROM Events 
-                    ORDER BY Epoch DESC 
-                    LIMIT ?
-                ''', (limit,))
-                return cursor.fetchall()
-        except sqlite3.Error as e:
-            logging.error(f"❌ Failed to retrieve events: {e}")
-            return []
-            
     def get_event_count(self):
         """Get total number of events in database.
         
@@ -116,63 +93,29 @@ class EventDatabase:
             logging.error(f"❌ Failed to get event count: {e}")
             return 0
 
-    def get_event_count_24h(self):
-        """Get number of events from the last 24 hours starting at midnight.
+    def get_event_count_today(self):
+        """Get number of events from today only (since midnight today).
         
         Returns:
-            int: Number of events from last 24 hours
+            int: Number of events from today
         """
         try:
-            from datetime import datetime, timedelta
+            from datetime import datetime
             
-            # Get current time and calculate midnight 24 hours ago
+            # Get midnight of today
             now = datetime.now()
             midnight_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            midnight_24h_ago = midnight_today - timedelta(days=1)
             
             # Convert to Unix timestamp
-            start_epoch = int(midnight_24h_ago.timestamp())
+            start_epoch = int(midnight_today.timestamp())
             
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute('SELECT COUNT(*) FROM Events WHERE Epoch >= ?', (start_epoch,))
                 return cursor.fetchone()[0]
         except sqlite3.Error as e:
-            logging.error(f"❌ Failed to get 24h event count: {e}")
+            logging.error(f"❌ Failed to get today's event count: {e}")
             return 0
         except Exception as e:
-            logging.error(f"❌ Error calculating 24h event count: {e}")
+            logging.error(f"❌ Error calculating today's event count: {e}")
             return 0
-            
-    def get_events_by_date(self, year, month, day=None):
-        """Get events for a specific date.
-        
-        Args:
-            year: Year to filter by
-            month: Month to filter by  
-            day: Optional day to filter by
-            
-        Returns:
-            List of tuples containing event data
-        """
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                if day is not None:
-                    cursor.execute('''
-                        SELECT Epoch, Month, Day, Year, Size, Path 
-                        FROM Events 
-                        WHERE Year = ? AND Month = ? AND Day = ?
-                        ORDER BY Epoch DESC
-                    ''', (year, month, day))
-                else:
-                    cursor.execute('''
-                        SELECT Epoch, Month, Day, Year, Size, Path 
-                        FROM Events 
-                        WHERE Year = ? AND Month = ?
-                        ORDER BY Epoch DESC
-                    ''', (year, month))
-                return cursor.fetchall()
-        except sqlite3.Error as e:
-            logging.error(f"❌ Failed to retrieve events by date: {e}")
-            return []

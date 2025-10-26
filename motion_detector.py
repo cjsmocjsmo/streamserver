@@ -28,7 +28,6 @@ class MotionDetector:
         )
         
         self.last_motion_time = 0
-        self.motion_detected = False
         
         logging.info(f"✅ Motion detector initialized (threshold: {self.threshold}, min_area: {self.min_area})")
         
@@ -70,27 +69,8 @@ class MotionDetector:
             if motion_detected:
                 self.last_motion_time = time.time()
                 
-            self.motion_detected = motion_detected
             return motion_detected, motion_boxes
             
         except Exception as e:
             logging.error(f"❌ Motion detection error: {e}")
             return False, []
-            
-    def is_motion_recent(self, timeout=2.0):
-        """Check if motion was detected recently.
-        
-        Args:
-            timeout: How many seconds to consider motion "recent"
-            
-        Returns:
-            bool: True if motion was detected within timeout seconds
-        """
-        return (time.time() - self.last_motion_time) < timeout
-        
-    def reset(self):
-        """Reset the motion detector state."""
-        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(detectShadows=True)
-        self.last_motion_time = 0
-        self.motion_detected = False
-        logging.info("🔄 Motion detector reset")

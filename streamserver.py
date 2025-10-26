@@ -83,17 +83,7 @@ class MotionStreamingOutput(StreamingOutput):
         self.video_recorder = VideoRecorder(config.video, self.database)
         
         # Processing state
-        self.frame_count = 0
-        self.motion_status = "No Motion"
         self.motion_processing_active = True
-        
-        # Start motion processing thread
-        self.motion_thread = threading.Thread(
-            target=self._motion_processing_loop, 
-            daemon=True,
-            name="MotionProcessor"
-        )
-        self.motion_thread.start()
         
         logger.info("🎥 Motion streaming output initialized")
 
@@ -112,8 +102,6 @@ class MotionStreamingOutput(StreamingOutput):
             frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             
             if frame is not None:
-                self.frame_count += 1
-                
                 # Detect motion and get bounding boxes
                 motion_detected, motion_boxes = self.motion_detector.detect_motion(frame)
                 
@@ -129,8 +117,6 @@ class MotionStreamingOutput(StreamingOutput):
                 
                 # Handle motion detection results
                 if motion_detected:
-                    self.motion_status = "Motion Detected!"
-                    
                     # Start recording if not already recording
                     if not self.video_recorder.is_recording:
                         prebuffer_frames = self.circular_buffer.get_prebuffer_frames()
@@ -138,8 +124,6 @@ class MotionStreamingOutput(StreamingOutput):
                         
                         if self.video_recorder.start_recording(prebuffer_frames, frame_size):
                             logger.info("🔴 Motion detected - recording started")
-                else:
-                    self.motion_status = "No Motion"
                 
                 # Add original frame to circular buffer and recording
                 self.circular_buffer.add_frame(frame)
@@ -162,21 +146,9 @@ class MotionStreamingOutput(StreamingOutput):
             # Fallback to original behavior
             return super().write(buf)
 
-    def _motion_processing_loop(self):
-        """Motion processing loop - simplified since detection moved to write method."""
-        logger.info("🔄 Motion processing thread started")
-        
-        # Keep thread alive but motion detection now happens in write() method
-        while self.motion_processing_active:
-            time.sleep(1)  # Just keep thread alive
-                
-        logger.info("🛑 Motion processing thread stopped")
-
     def stop_motion_processing(self):
-        """Stop the motion processing thread."""
+        """Stop the motion processing."""
         self.motion_processing_active = False
-        if self.motion_thread.is_alive():
-            self.motion_thread.join(timeout=2.0)
             
         # Force stop any ongoing recording
         if self.video_recorder.is_recording:
@@ -249,10 +221,10 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
         """Serve event count as JSON for AJAX requests."""
         try:
             # Get event counts from database
-            event_count_24h = 0
+            event_count_today = 0
             total_event_count = 0
             if self.output_instance and hasattr(self.output_instance, 'database'):
-                event_count_24h = self.output_instance.database.get_event_count_24h()
+                event_count_today = self.output_instance.database.get_event_count_today()
                 total_event_count = self.output_instance.database.get_event_count()
             
             # Get stream health status
@@ -263,7 +235,7 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                 health_status = self.watchdog_instance.get_health_status()
             
             # Create JSON response with counts and health status
-            json_data = f'{{"count24h": {event_count_24h}, "totalCount": {total_event_count}, "healthStatus": "{health_status}"}}'
+            json_data = f'{{"countToday": {event_count_today}, "totalCount": {total_event_count}, "healthStatus": "{health_status}"}}'
             
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -275,7 +247,7 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"❌ Error serving event count JSON: {e}")
             # Send error response
-            error_json = '{"count24h": 0, "totalCount": 0, "error": "Failed to get count"}'
+            error_json = '{"countToday": 0, "totalCount": 0, "error": "Failed to get count"}'
             self.send_response(500)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', len(error_json))
@@ -285,10 +257,10 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
     def _get_html_content(self) -> bytes:
         """Get the HTML content for the main page."""
         # Get event counts from database
-        event_count = 0  # 24-hour count
+        event_count = 0  # Today's count
         total_event_count = 0  # Total count
         if self.output_instance and hasattr(self.output_instance, 'database'):
-            event_count = self.output_instance.database.get_event_count_24h()
+            event_count = self.output_instance.database.get_event_count_today()
             total_event_count = self.output_instance.database.get_event_count()
         
         html = f'''<!DOCTYPE html>
@@ -359,7 +331,7 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
         
         <div class="footer">
             <p>Health: <span class="healthstatus"></span></p>
-            <p>Events (24h): <span class="numbevents">{event_count}</span></p>
+            <p>Events (Today): <span class="numbevents">{event_count}</span></p>
             <p>Total Events Recorded: <span class="totalevents">{total_event_count}</span></p>
         </div>
     </div>
@@ -372,10 +344,10 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                 if (response.ok) {{
                     const data = await response.json();
                     
-                    // Update 24-hour count
-                    const count24hElement = document.querySelector('.numbevents');
-                    if (count24hElement) {{
-                        count24hElement.textContent = data.count24h;
+                    // Update today's count
+                    const countTodayElement = document.querySelector('.numbevents');
+                    if (countTodayElement) {{
+                        countTodayElement.textContent = data.countToday;
                     }}
                     
                     // Update total count

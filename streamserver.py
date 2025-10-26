@@ -391,6 +391,11 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
         // Update event count every 30 seconds
         setInterval(updateEventCount, 30000);
 
+        // Refresh the page every 30 minutes (1800000 milliseconds)
+        setInterval(function() {{
+            window.location.reload();
+        }}, 1800000);
+
         // Also update on page load after a short delay to ensure DOM is ready
         window.addEventListener('DOMContentLoaded', function() {{
             setTimeout(updateEventCount, 1000);

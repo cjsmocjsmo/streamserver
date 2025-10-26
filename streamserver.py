@@ -247,10 +247,10 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
     def _serve_event_count_json(self):
         """Serve event count as JSON for AJAX requests."""
         try:
-            # Get event count from database
+            # Get event count from database (last 24 hours)
             event_count = 0
             if self.output_instance and hasattr(self.output_instance, 'database'):
-                event_count = self.output_instance.database.get_event_count()
+                event_count = self.output_instance.database.get_event_count_24h()
             
             # Create JSON response
             json_data = f'{{"count": {event_count}}}'
@@ -274,10 +274,10 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
 
     def _get_html_content(self) -> bytes:
         """Get the HTML content for the main page."""
-        # Get event count from database
+        # Get event count from database (last 24 hours)
         event_count = 0
         if self.output_instance and hasattr(self.output_instance, 'database'):
-            event_count = self.output_instance.database.get_event_count()
+            event_count = self.output_instance.database.get_event_count_24h()
         
         html = f'''<!DOCTYPE html>
 <html>
@@ -325,7 +325,7 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
         
         <div class="footer">
             <p>Motion Detection Stream Server v2.0</p>
-            <p>Events: <span class="numbevents">{event_count}</span></p>
+            <p>Events (24h): <span class="numbevents">{event_count}</span></p>
         </div>
     </div>
 

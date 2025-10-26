@@ -115,6 +115,34 @@ class EventDatabase:
         except sqlite3.Error as e:
             logging.error(f"❌ Failed to get event count: {e}")
             return 0
+
+    def get_event_count_24h(self):
+        """Get number of events from the last 24 hours starting at midnight.
+        
+        Returns:
+            int: Number of events from last 24 hours
+        """
+        try:
+            from datetime import datetime, timedelta
+            
+            # Get current time and calculate midnight 24 hours ago
+            now = datetime.now()
+            midnight_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            midnight_24h_ago = midnight_today - timedelta(days=1)
+            
+            # Convert to Unix timestamp
+            start_epoch = int(midnight_24h_ago.timestamp())
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT COUNT(*) FROM Events WHERE Epoch >= ?', (start_epoch,))
+                return cursor.fetchone()[0]
+        except sqlite3.Error as e:
+            logging.error(f"❌ Failed to get 24h event count: {e}")
+            return 0
+        except Exception as e:
+            logging.error(f"❌ Error calculating 24h event count: {e}")
+            return 0
             
     def get_events_by_date(self, year, month, day=None):
         """Get events for a specific date.

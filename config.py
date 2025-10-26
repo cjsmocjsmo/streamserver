@@ -7,39 +7,39 @@ from dataclasses import dataclass
 @dataclass
 class MotionConfig:
     """Motion detection configuration."""
-    threshold: int = 25
-    min_area: int = 1000
-    learning_rate: float = 0.001
+    threshold = 40          # Increased from 25 - higher = less sensitive
+    min_area = 2500         # Increased from 1000 - larger objects needed
+    learning_rate = 0.001
 
 
 @dataclass
 class VideoConfig:
     """Video recording configuration."""
-    fps: int = 30
-    pre_buffer_duration: int = 5  # seconds
-    post_motion_duration: int = 5  # seconds
-    output_dir: str = "recordings"
-    fourcc: str = "mp4v"
+    fps = 30
+    pre_buffer_duration = 5  # seconds
+    post_motion_duration = 5  # seconds
+    output_dir = "recordings"
+    fourcc = "mp4v"
 
 
 @dataclass
 class CameraConfig:
     """Camera configuration."""
     resolution = (640, 480)
-    format: str = "RGB888"
+    format = "RGB888"
 
 
 @dataclass
 class ServerConfig:
     """HTTP server configuration."""
-    host: str = ""
-    port: int = 8000
+    host = ""
+    port = 8000
 
 
 @dataclass
 class DatabaseConfig:
     """Database configuration."""
-    db_name: str = "events.db"
+    db_name = "events.db"
     
     @property
     def db_path(self):

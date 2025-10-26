@@ -323,9 +323,26 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             height: auto;
         }}
         .footer {{
-            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             margin-top: 30px;
             opacity: 0.7;
+            gap: 10px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            padding: 15px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }}
+        .footer p {{
+            margin: 0;
+            padding: 8px 15px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 5px;
+            min-width: 200px;
+            text-align: center;
+            border-left: 3px solid #00ff88;
         }}
         .healthstatus {{
             font-weight: bold;

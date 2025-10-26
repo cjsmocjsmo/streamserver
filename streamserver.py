@@ -186,6 +186,9 @@ class MotionStreamingOutput(StreamingOutput):
 class StreamingHandler(server.BaseHTTPRequestHandler):
     """HTTP handler for video streaming."""
     
+    # Class variable to store output instance for database access
+    output_instance = None
+    
     def do_GET(self):
         """Handle GET requests."""
         if self.path == '/':
@@ -241,6 +244,11 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
 
     def _get_html_content(self) -> bytes:
         """Get the HTML content for the main page."""
+        # Get event count from database
+        event_count = 0
+        if self.output_instance and hasattr(self.output_instance, 'database'):
+            event_count = self.output_instance.database.get_event_count()
+        
         html = f'''<!DOCTYPE html>
 <html>
 <head>
@@ -287,7 +295,7 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
         
         <div class="footer">
             <p>Motion Detection Stream Server v2.0</p>
-            <p>High-performance video streaming with OpenCV motion detection</p>
+            <p>Events: <span class="numbevents">{event_count}</span></p>
         </div>
     </div>
 </body>
@@ -508,6 +516,10 @@ def run_stream_server():
                 
                 # Start HTTP server
                 address = (config.server.host, config.server.port)
+                
+                # Set output instance for database access in handler
+                StreamingHandler.output_instance = output
+                
                 server_instance = StreamingServer(address, StreamingHandler)
                 
                 logger.info(f"🌐 Server started on http://localhost:{config.server.port}")

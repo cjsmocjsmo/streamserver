@@ -373,7 +373,7 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                         healthStatusElement.textContent = data.healthStatus;
                         // Set color based on health status
                         if (data.healthStatus === 'Healthy') {{
-                            healthStatusElement.style.color = 'green';
+                            healthStatusElement.style.color = 'white';
                         }} else if (data.healthStatus === 'Unhealthy' || data.healthStatus === 'Stopped') {{
                             healthStatusElement.style.color = 'red';
                         }} else {{

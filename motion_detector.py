@@ -39,10 +39,10 @@ class MotionDetector:
             frame: Input frame as numpy array
             
         Returns:
-            bool: True if motion detected, False otherwise
+            tuple: (bool, list) - Motion detected flag and list of bounding boxes
         """
         if frame is None:
-            return False
+            return False, []
             
         try:
             # Apply background subtraction with learning rate
@@ -58,20 +58,24 @@ class MotionDetector:
             
             # Check if any contour is large enough to be considered motion
             motion_detected = False
+            motion_boxes = []
+            
             for contour in contours:
                 if cv2.contourArea(contour) > self.min_area:
                     motion_detected = True
-                    break
+                    # Get bounding box for this motion area
+                    x, y, w, h = cv2.boundingRect(contour)
+                    motion_boxes.append((x, y, w, h))
                     
             if motion_detected:
                 self.last_motion_time = time.time()
                 
             self.motion_detected = motion_detected
-            return motion_detected
+            return motion_detected, motion_boxes
             
         except Exception as e:
             logging.error(f"❌ Motion detection error: {e}")
-            return False
+            return False, []
             
     def is_motion_recent(self, timeout=2.0):
         """Check if motion was detected recently.

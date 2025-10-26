@@ -86,7 +86,6 @@ class MotionStreamingOutput(StreamingOutput):
         self.frame_count = 0
         self.motion_status = "No Motion"
         self.motion_processing_active = True
-        self.latest_frame_for_processing = None
         
         # Start motion processing thread
         self.motion_thread = threading.Thread(
@@ -107,9 +106,6 @@ class MotionStreamingOutput(StreamingOutput):
         Returns:
             int: Number of bytes written
         """
-        # Call parent write method
-        result = super().write(buf)
-        
         try:
             # Convert JPEG to numpy array for processing
             nparr = np.frombuffer(buf, np.uint8)
@@ -118,15 +114,53 @@ class MotionStreamingOutput(StreamingOutput):
             if frame is not None:
                 self.frame_count += 1
                 
-                # Store latest frame for motion processing
-                self.latest_frame_for_processing = frame.copy()
+                # Detect motion and get bounding boxes
+                motion_detected, motion_boxes = self.motion_detector.detect_motion(frame)
                 
-                # Add to circular buffer
+                # Draw motion detection boxes on frame
+                display_frame = frame.copy()
+                if motion_detected and motion_boxes:
+                    for (x, y, w, h) in motion_boxes:
+                        # Draw green rectangle around motion area
+                        cv2.rectangle(display_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                        # Add motion label
+                        cv2.putText(display_frame, "MOTION", (x, y - 10), 
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                
+                # Handle motion detection results
+                if motion_detected:
+                    self.motion_status = "Motion Detected!"
+                    
+                    # Start recording if not already recording
+                    if not self.video_recorder.is_recording:
+                        prebuffer_frames = self.circular_buffer.get_prebuffer_frames()
+                        frame_size = (frame.shape[1], frame.shape[0])  # (width, height)
+                        
+                        if self.video_recorder.start_recording(prebuffer_frames, frame_size):
+                            logger.info("🔴 Motion detected - recording started")
+                else:
+                    self.motion_status = "No Motion"
+                
+                # Add original frame to circular buffer and recording
                 self.circular_buffer.add_frame(frame)
-                
-                # Add to recording if active
                 if self.video_recorder.is_recording:
                     self.video_recorder.add_frame(frame)
+                
+                # Convert display frame (with boxes) back to JPEG for streaming
+                _, jpeg_data = cv2.imencode('.jpg', display_frame)
+                
+                # Call parent write method with the annotated frame
+                with self.condition:
+                    self.frame = jpeg_data.tobytes()
+                    self.last_frame_time = time.time()
+                    self.condition.notify_all()
+                    
+                return len(jpeg_data.tobytes())
+                    
+        except Exception as e:
+            logger.error(f"❌ Frame processing error: {e}")
+            # Fallback to original behavior
+            return super().write(buf)
                     
         except Exception as e:
             logger.error(f"❌ Error processing frame: {e}")
@@ -134,37 +168,12 @@ class MotionStreamingOutput(StreamingOutput):
         return result
 
     def _motion_processing_loop(self):
-        """Background thread for motion detection processing."""
+        """Motion processing loop - simplified since detection moved to write method."""
         logger.info("🔄 Motion processing thread started")
         
+        # Keep thread alive but motion detection now happens in write() method
         while self.motion_processing_active:
-            try:
-                if self.latest_frame_for_processing is not None:
-                    frame = self.latest_frame_for_processing.copy()
-                    self.latest_frame_for_processing = None
-                    
-                    # Detect motion
-                    motion_detected = self.motion_detector.detect_motion(frame)
-                    
-                    if motion_detected:
-                        self.motion_status = "Motion Detected!"
-                        
-                        # Start recording if not already recording
-                        if not self.video_recorder.is_recording:
-                            prebuffer_frames = self.circular_buffer.get_prebuffer_frames()
-                            frame_size = (frame.shape[1], frame.shape[0])  # (width, height)
-                            
-                            if self.video_recorder.start_recording(prebuffer_frames, frame_size):
-                                logger.info("🔴 Motion detected - recording started")
-                    else:
-                        self.motion_status = "No Motion"
-                
-                # Small delay to prevent excessive CPU usage
-                time.sleep(0.01)
-                
-            except Exception as e:
-                logger.error(f"❌ Motion processing error: {e}")
-                time.sleep(0.1)  # Longer delay on error
+            time.sleep(1)  # Just keep thread alive
                 
         logger.info("🛑 Motion processing thread stopped")
 
@@ -291,33 +300,6 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
         .container {{
             max-width: 1200px;
             margin: 0 auto;
-        }}
-        h1 {{
-            text-align: center;
-            margin-bottom: 30px;
-            font-size: 2.5em;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }}
-        .status-bar {{
-            display: flex;
-            justify-content: space-around;
-            margin-bottom: 20px;
-            padding: 20px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 10px;
-            backdrop-filter: blur(10px);
-        }}
-        .status-item {{
-            text-align: center;
-        }}
-        .status-label {{
-            font-size: 0.9em;
-            opacity: 0.8;
-            margin-bottom: 5px;
-        }}
-        .status-value {{
-            font-size: 1.2em;
-            font-weight: bold;
         }}
         .camera-container {{
             text-align: center;

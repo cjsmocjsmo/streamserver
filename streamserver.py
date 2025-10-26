@@ -195,6 +195,8 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             self._serve_html_page()
         elif self.path == '/stream.mjpg':
             self._serve_mjpeg_stream()
+        elif self.path == '/api/events/count':
+            self._serve_event_count_json()
         elif self.path == '/favicon.ico':
             self._serve_favicon()
         else:
@@ -241,6 +243,34 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
         """Serve a simple favicon response."""
         self.send_response(204)  # No Content
         self.end_headers()
+
+    def _serve_event_count_json(self):
+        """Serve event count as JSON for AJAX requests."""
+        try:
+            # Get event count from database
+            event_count = 0
+            if self.output_instance and hasattr(self.output_instance, 'database'):
+                event_count = self.output_instance.database.get_event_count()
+            
+            # Create JSON response
+            json_data = f'{{"count": {event_count}}}'
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')  # Enable CORS if needed
+            self.send_header('Content-Length', len(json_data))
+            self.end_headers()
+            self.wfile.write(json_data.encode('utf-8'))
+            
+        except Exception as e:
+            logger.error(f"❌ Error serving event count JSON: {e}")
+            # Send error response
+            error_json = '{"count": 0, "error": "Failed to get count"}'
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', len(error_json))
+            self.end_headers()
+            self.wfile.write(error_json.encode('utf-8'))
 
     def _get_html_content(self) -> bytes:
         """Get the HTML content for the main page."""
@@ -298,6 +328,34 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             <p>Events: <span class="numbevents">{event_count}</span></p>
         </div>
     </div>
+
+    <script>
+        // Function to update event count
+        async function updateEventCount() {{
+            try {{
+                const response = await fetch('/api/events/count');
+                if (response.ok) {{
+                    const data = await response.json();
+                    const countElement = document.querySelector('.numbevents');
+                    if (countElement) {{
+                        countElement.textContent = data.count;
+                    }}
+                }} else {{
+                    console.error('Failed to fetch event count:', response.status);
+                }}
+            }} catch (error) {{
+                console.error('Error updating event count:', error);
+            }}
+        }}
+
+        // Update event count every 30 seconds
+        setInterval(updateEventCount, 30000);
+
+        // Also update on page load after a short delay to ensure DOM is ready
+        window.addEventListener('DOMContentLoaded', function() {{
+            setTimeout(updateEventCount, 1000);
+        }});
+    </script>
 </body>
 </html>'''
         return html.encode('utf-8')

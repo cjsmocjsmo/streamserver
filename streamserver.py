@@ -161,11 +161,6 @@ class MotionStreamingOutput(StreamingOutput):
             logger.error(f"❌ Frame processing error: {e}")
             # Fallback to original behavior
             return super().write(buf)
-                    
-        except Exception as e:
-            logger.error(f"❌ Error processing frame: {e}")
-            
-        return result
 
     def _motion_processing_loop(self):
         """Motion processing loop - simplified since detection moved to write method."""
@@ -240,44 +235,6 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             logger.warning(f"Client disconnected: {e}")
 
     def _serve_favicon(self):
-        """Serve a simple favicon response."""
-        self.send_response(204)  # No Content
-        self.end_headers()
-
-    def _get_html_content(self):
-        """Get the HTML content for the main page."""
-        self.end_headers()
-        self.wfile.write(content)
-
-    def _serve_mjpeg_stream(self) -> None:
-        """Serve the MJPEG video stream."""
-        self.send_response(200)
-        self.send_header('Age', 0)
-        self.send_header('Cache-Control', 'no-cache, private')
-        self.send_header('Pragma', 'no-cache')
-        self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=FRAME')
-        self.end_headers()
-        
-        try:
-            while True:
-                with output.condition:
-                    output.condition.wait()
-                    frame = output.frame
-                    
-                if frame is None:
-                    continue
-                    
-                self.wfile.write(b'--FRAME\r\n')
-                self.send_header('Content-Type', 'image/jpeg')
-                self.send_header('Content-Length', len(frame))
-                self.end_headers()
-                self.wfile.write(frame)
-                self.wfile.write(b'\r\n')
-                
-        except Exception as e:
-            logger.warning(f"Client disconnected: {e}")
-
-    def _serve_favicon(self) -> None:
         """Serve a simple favicon response."""
         self.send_response(204)  # No Content
         self.end_headers()

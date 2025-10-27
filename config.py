@@ -7,9 +7,9 @@ from dataclasses import dataclass
 @dataclass
 class MotionConfig:
     """Motion detection configuration."""
-    threshold = 40          # Increased from 25 - higher = less sensitive
-    min_area = 2500         # Increased from 1000 - larger objects needed
-    learning_rate = 0.001
+    threshold = 50          # Higher threshold for less sensitivity to small movements
+    min_area = 5000         # Larger minimum area for human-sized objects (approx 70x70 pixels)
+    learning_rate = 0.005   # Faster background adaptation to reduce false positives
 
 
 @dataclass

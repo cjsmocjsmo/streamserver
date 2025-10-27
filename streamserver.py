@@ -281,6 +281,10 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             margin: 0 auto;
         }}
         .camera-container {{
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             text-align: center;
             background: rgba(0,0,0,0.3);
             border-radius: 15px;
@@ -293,6 +297,8 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
             max-width: 100%;
             height: auto;
+            display: block;
+            margin: 0 auto;
         }}
         .footer {{
             display: flex;

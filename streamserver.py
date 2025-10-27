@@ -334,6 +334,15 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             <p>Events (Today): <span class="numbevents">{event_count}</span></p>
             <p>Total Events Recorded: <span class="totalevents">{total_event_count}</span></p>
         </div>
+        <audio id="backgroundAudio" autoplay loop>
+            <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KPLZFMAAC.aac" type="audio/aac">
+            <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KPLZFM.mp3" type="audio/mpeg">
+            <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KMADFMAAC.aac" type="audio/aac">
+            <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KMADFM.mp3" type="audio/mpeg">
+            <source src="https://ice42.securenetsystems.net/KPLZ" type="audio/mpeg">
+            <source src="https://ice42.securenetsystems.net/KMAD" type="audio/mpeg">
+            Your browser does not support the audio element.
+        </audio>
     </div>
 
     <script>

@@ -334,7 +334,7 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             <p>Events (Today): <span class="numbevents">{event_count}</span></p>
             <p>Total Events Recorded: <span class="totalevents">{total_event_count}</span></p>
         </div>
-        <audio id="backgroundAudio" autoplay loop>
+        <audio id="backgroundAudio" autoplay loop muted preload="auto">
             <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KPLZFMAAC.aac" type="audio/aac">
             <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KPLZFM.mp3" type="audio/mpeg">
             <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KMADFMAAC.aac" type="audio/aac">
@@ -397,6 +397,21 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
         // Also update on page load after a short delay to ensure DOM is ready
         window.addEventListener('DOMContentLoaded', function() {{
             setTimeout(updateEventCount, 1000);
+            
+            // Ensure audio autoplays
+            const audio = document.getElementById('backgroundAudio');
+            if (audio) {{
+                // Start muted to bypass autoplay restrictions
+                audio.muted = true;
+                audio.play().then(() => {{
+                    // Unmute after successful autoplay
+                    setTimeout(() => {{
+                        audio.muted = false;
+                    }}, 1000);
+                }}).catch(e => {{
+                    console.log('Autoplay failed:', e);
+                }});
+            }}
         }});
     </script>
 </body>

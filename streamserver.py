@@ -327,6 +327,14 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             font-size: 1.1em;
             transition: color 0.3s ease;
         }}
+        .aplayer {{
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            margin: 20px auto;
+            text-align: center;
+        }}
     </style>
 </head>
 <body>
@@ -340,15 +348,17 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             <p>Events (Today): <span class="numbevents">{event_count}</span></p>
             <p>Total Events Recorded: <span class="totalevents">{total_event_count}</span></p>
         </div>
-        <audio id="backgroundAudio" controls autoplay loop muted preload="auto">
-            <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KPLZFMAAC.aac" type="audio/aac">
-            <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KPLZFM.mp3" type="audio/mpeg">
-            <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KMADFMAAC.aac" type="audio/aac">
-            <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KMADFM.mp3" type="audio/mpeg">
-            <source src="https://ice42.securenetsystems.net/KPLZ" type="audio/mpeg">
-            <source src="https://ice42.securenetsystems.net/KMAD" type="audio/mpeg">
-            Your browser does not support the audio element.
-        </audio>
+        <div class="aplayer">
+            <audio id="backgroundAudio" controls autoplay loop muted preload="auto">
+                <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KPLZFMAAC.aac" type="audio/aac">
+                <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KPLZFM.mp3" type="audio/mpeg">
+                <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KMADFMAAC.aac" type="audio/aac">
+                <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KMADFM.mp3" type="audio/mpeg">
+                <source src="https://ice42.securenetsystems.net/KPLZ" type="audio/mpeg">
+                <source src="https://ice42.securenetsystems.net/KMAD" type="audio/mpeg">
+                Your browser does not support the audio element.
+            </audio>
+        </div>
     </div>
 
     <script>

@@ -334,7 +334,7 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             <p>Events (Today): <span class="numbevents">{event_count}</span></p>
             <p>Total Events Recorded: <span class="totalevents">{total_event_count}</span></p>
         </div>
-        <audio id="backgroundAudio" autoplay loop muted preload="auto">
+        <audio id="backgroundAudio" controls autoplay loop muted preload="auto">
             <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KPLZFMAAC.aac" type="audio/aac">
             <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KPLZFM.mp3" type="audio/mpeg">
             <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KMADFMAAC.aac" type="audio/aac">

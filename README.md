@@ -1,17 +1,15 @@
-# Motion Detection Stream Server v2.0
+# Simple MJPEG Stream Server
 
-A professional-grade video streaming server with real-time motion detection capabilities for Raspberry Pi.
+A minimal, high-performance video streaming server for Raspberry Pi camera with automatic error recovery.
 
 ## 🌟 Features
 
-- **Real-time MJPEG Streaming**: High-performance video streaming with web interface
-- **OpenCV Motion Detection**: Advanced background subtraction with configurable sensitivity
-- **Automatic Recording**: Pre/post motion buffers with configurable durations
-- **SQLite Event Logging**: Complete database tracking of all motion events
-- **Multi-threaded Architecture**: Optimized for smooth performance
-- **Web Monitoring Interface**: Beautiful, responsive web UI
-- **Error Recovery**: Automatic stream health monitoring and recovery
-- **Modular Design**: Clean, maintainable Python code following best practices
+- **Real-time MJPEG Streaming**: High-performance video streaming via HTTP
+- **Minimal Dependencies**: Only Picamera2 and OpenCV for JPEG encoding
+- **Automatic Error Recovery**: Camera restart on any errors with comprehensive logging
+- **Multi-threaded Architecture**: Optimized for smooth streaming performance
+- **Comprehensive Logging**: Detailed error logging with separate error files
+- **Service Integration**: Systemd service files for automatic startup
 
 ## 🚀 Quick Start
 
@@ -21,159 +19,98 @@ A professional-grade video streaming server with real-time motion detection capa
 
 ### Installation
 
-**Important**: This project uses APT packages only to comply with PEP 668 (externally-managed-environment) on modern Debian/Ubuntu systems.
+```bash
+# Install system dependencies
+sudo apt update
+sudo apt install python3-opencv python3-picamera2
 
-1. **Automated setup (recommended):**
-   ```bash
-   git clone <your-repo>
-   cd streamserver
-   python3 setup.py
-   ```
-   
-   The setup script will automatically:
-   - Install all required packages via `apt` (python3-opencv, python3-numpy, python3-picamera2)
-   - Create necessary directories
-   - Provide clear error messages if packages cannot be installed
+# Clone and run
+git clone <your-repo>
+cd streamserver
+python3 streamserver.py
+```
 
-2. **Manual installation (if needed):**
-   ```bash
-   # Install all dependencies via apt
-   sudo apt update
-   sudo apt install python3-opencv python3-numpy python3-picamera2
-   ```
+### Access the Stream
 
-**Note**: This project deliberately avoids pip installation to comply with PEP 668 externally-managed-environment restrictions on modern systems. All required packages are available in Debian/Ubuntu repositories.
-
-3. **Run the server:**
-   ```bash
-   python3 streamserver.py
-   ```
-
-4. **Access the web interface:**
-   Open http://localhost:8000 in your browser
+Open http://localhost:8000/stream.mjpg in your browser or media player
 
 ## 📁 Project Structure
 
 ```
 streamserver/
-├── streamserver.py         # Main application
-├── config.py              # Configuration management
-├── database.py            # SQLite event database
-├── motion_detector.py     # OpenCV motion detection
-├── video_recorder.py      # Video recording and buffering
-├── dependencies.py        # Dependency management
-├── exceptions.py          # Custom exception classes
-├── logger.py             # Logging configuration
-├── setup.py              # Setup script
-├── requirements.txt       # Python dependencies
-├── __init__.py           # Package initialization
+├── streamserver.py         # Main streaming server
+├── config.py              # Camera and server configuration
+├── dependencies.py        # Dependency verification
+├── exceptions.py          # Custom exception classes  
+├── logger.py             # Comprehensive logging system
+├── streamserver.service   # Systemd service file
+├── install-service.sh     # Service installer script
+├── uninstall-service.sh   # Service uninstaller script
 └── README.md             # This file
 ```
 
 ## ⚙️ Configuration
 
-The application uses a configuration system with sensible defaults. Key settings:
+The server uses minimal configuration with sensible defaults:
 
-### Motion Detection
-- **Threshold**: Motion sensitivity (default: 25)
-- **Min Area**: Minimum pixel area for motion (default: 1000)
-- **Learning Rate**: Background adaptation rate (default: 0.001)
+### Camera Settings
+- **Resolution**: 640x480 (configurable in config.py)
+- **Format**: RGB888 for compatibility
+- **FPS**: 30 fps for smooth streaming
 
-### Video Recording
-- **FPS**: Recording frame rate (default: 30)
-- **Pre-buffer**: Seconds to record before motion (default: 5)
-- **Post-buffer**: Seconds to record after motion (default: 5)
-- **Output Directory**: Where videos are saved (default: "recordings")
+### Server Settings  
+- **Host**: All interfaces (0.0.0.0)
+- **Port**: 8000 (configurable in config.py)
 
-### Camera
-- **Resolution**: Video resolution (default: 640x480)
-- **Format**: Pixel format (default: "RGB888")
+## 🔄 Error Recovery
 
-## 🗄️ Database Schema
+The server includes comprehensive error recovery:
 
-Events are stored in SQLite with the following schema:
+- **Camera Restart**: Automatic camera restart on any hardware errors
+- **Retry Logic**: Multiple retry attempts for camera initialization and streaming
+- **Error Logging**: Detailed error logs with full stack traces
+- **Graceful Degradation**: Clean shutdown after maximum restart attempts
 
-```sql
-CREATE TABLE Events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    Epoch INTEGER NOT NULL,        -- Unix timestamp
-    Month INTEGER NOT NULL,        -- 1-12
-    Day INTEGER NOT NULL,          -- 1-31
-    Year INTEGER NOT NULL,         -- Full year
-    Size INTEGER NOT NULL,         -- File size in bytes
-    Path TEXT NOT NULL,           -- Full file path
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
+## 🗂️ Logging
 
-## 🔧 API Usage
+Comprehensive logging system:
+- **Main Log**: All operations and debug information
+- **Error Log**: Dedicated error file for troubleshooting
+- **Console Output**: Real-time status and important messages
+- **Exception Capture**: Automatic capture of uncaught exceptions
 
-### Basic Usage
-```python
-from config import AppConfig
-from database import EventDatabase
-from motion_detector import MotionDetector
-from video_recorder import VideoRecorder, CircularVideoBuffer
+Log files are created in the `logs/` directory with timestamps.
 
-# Initialize with default config
-config = AppConfig()
+## 🔧 Installation as Service
 
-# Create components
-database = EventDatabase(config.database)
-motion_detector = MotionDetector(config.motion)
-buffer = CircularVideoBuffer(config.video)
-recorder = VideoRecorder(config.video, database)
-```
-
-### Custom Configuration
-```python
-from config import AppConfig, MotionConfig, VideoConfig
-
-config = AppConfig()
-config.motion.threshold = 30
-config.motion.min_area = 500
-config.video.fps = 60
-config.video.pre_buffer_duration = 10
-```
-
-## 📊 Performance Optimizations
-
-### v2.0 Improvements:
-1. **Modular Architecture**: Separated concerns into focused modules
-2. **Type Hints**: Full type annotation for better IDE support and debugging
-3. **Error Handling**: Comprehensive exception handling with custom exceptions
-4. **Logging**: Professional logging system with file and console output
-5. **Configuration Management**: Centralized, type-safe configuration system
-6. **Database Improvements**: Enhanced schema with better indexing
-7. **Thread Safety**: Improved multi-threading with proper synchronization
-8. **Resource Management**: Proper cleanup and resource management
-9. **Documentation**: Comprehensive docstrings and type hints
-10. **Testing Ready**: Structure prepared for unit testing
-
-## 🧪 Testing
-
-The modular structure makes testing easy:
+Install as a systemd service for automatic startup:
 
 ```bash
-# Install dev dependencies
-pip install pytest pytest-cov
+# Install service
+./install-service.sh
 
-# Run tests (when test files are added)
-pytest tests/ -v --cov=.
+# Control service
+sudo systemctl start streamserver
+sudo systemctl stop streamserver  
+sudo systemctl status streamserver
+
+# View logs
+sudo journalctl -u streamserver -f
 ```
 
-## 📝 Logging
+## 📊 Performance
 
-Logs are written to both console and files in the `logs/` directory:
-- **Console**: Real-time status and errors
-- **Files**: Complete log history with timestamps
-- **Levels**: INFO, WARNING, ERROR, CRITICAL
+Optimized for minimal resource usage:
+- **Low CPU**: Efficient JPEG encoding and streaming
+- **Low Memory**: Minimal buffering with circular frame buffer
+- **Automatic Recovery**: Restart on errors to maintain uptime
+- **Thread Safety**: Proper synchronization for multi-threaded operation
 
 ## 🔒 Security Considerations
 
-- **Network Access**: Server binds to all interfaces (0.0.0.0) by default
-- **File Permissions**: Ensure proper permissions on recordings directory
-- **Resource Limits**: Monitor disk space for recordings and logs
+- **Network Access**: Server binds to all interfaces by default
+- **Camera Permissions**: Ensure user is in 'video' group
+- **Resource Limits**: Monitor system resources during operation
 
 ## 🐛 Troubleshooting
 
@@ -181,26 +118,23 @@ Logs are written to both console and files in the `logs/` directory:
 
 1. **Camera not found**
    ```
-   Solution: Check camera connection and enable camera in raspi-config
+   Solution: Check camera connection and enable camera interface
    ```
 
 2. **Permission denied**
    ```
-   Solution: Ensure user is in 'video' group: sudo usermod -a -G video $USER
+   Solution: Add user to video group: sudo usermod -a -G video $USER
    ```
 
-3. **High CPU usage**
+3. **Import errors**
    ```
-   Solution: Reduce resolution or FPS in configuration
+   Solution: Install packages: sudo apt install python3-opencv python3-picamera2
    ```
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes following the existing code style
-4. Add tests for new functionality
-5. Submit a pull request
+4. **Stream not accessible**
+   ```
+   Solution: Check firewall and network configuration
+   ```
 
 ## 📄 License
 
@@ -208,6 +142,6 @@ MIT License - see LICENSE file for details.
 
 ## 🙏 Acknowledgments
 
-- OpenCV community for computer vision tools
-- Raspberry Pi Foundation for the excellent camera integration
+- Raspberry Pi Foundation for excellent camera integration
+- OpenCV community for image processing tools
 - Python community for the robust ecosystem

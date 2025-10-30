@@ -1,8 +1,6 @@
 """Dependency management and installation."""
 
 import logging
-import subprocess
-import sys
 
 
 def verify_picamera2():

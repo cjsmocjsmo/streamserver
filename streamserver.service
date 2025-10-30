@@ -5,10 +5,10 @@ Wants=network.target
 
 [Service]
 Type=simple
-User=picam
-Group=picam
-WorkingDirectory=/home/picam/streamserver
-ExecStart=/usr/bin/python3 /home/picam/streamserver/streamserver.py
+User=pipi
+Group=pipi
+WorkingDirectory=/home/pipi/Desktop/streamserver
+ExecStart=/usr/bin/python3 /home/pipi/Desktop/streamserver/streamserver.py
 Restart=always
 RestartSec=5
 StandardOutput=journal

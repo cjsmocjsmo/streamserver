@@ -1,6 +1,5 @@
 """Configuration management for the simple stream server."""
 
-import os
 from dataclasses import dataclass
 
 

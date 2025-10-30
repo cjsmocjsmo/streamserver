@@ -6,11 +6,11 @@ from datetime import datetime
 from pathlib import Path
 
 
-def setup_logging(level=logging.INFO, log_file=None, log_dir="logs"):
-    """Set up logging configuration.
+def setup_logging(level=logging.DEBUG, log_file=None, log_dir="logs"):
+    """Set up comprehensive logging configuration.
     
     Args:
-        level: Logging level (default: INFO)
+        level: Logging level (default: DEBUG to catch all errors)
         log_file: Optional log file name (default: auto-generated)
         log_dir: Directory for log files (default: "logs")
     """
@@ -25,33 +25,52 @@ def setup_logging(level=logging.INFO, log_file=None, log_dir="logs"):
     
     log_filepath = log_path / log_file
     
-    # Configure logging format
+    # Configure detailed logging format
     formatter = logging.Formatter(
-        fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        fmt='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     
     # Configure root logger
     root_logger = logging.getLogger()
-    root_logger.setLevel(level)
+    root_logger.setLevel(logging.DEBUG)  # Capture all levels
     
     # Remove existing handlers
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
     
-    # Console handler
+    # Console handler (INFO and above for readability)
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(level)
+    console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
     
-    # File handler
+    # File handler (DEBUG and above for comprehensive logging)
     file_handler = logging.FileHandler(log_filepath, mode='a')
-    file_handler.setLevel(level)
+    file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
     
-    logging.info(f"📝 Logging initialized - File: {log_filepath}")
+    # Error file handler (ERROR and above for critical issues)
+    error_log_filepath = log_path / f"errors_{timestamp}.log"
+    error_handler = logging.FileHandler(error_log_filepath, mode='a')
+    error_handler.setLevel(logging.ERROR)
+    error_handler.setFormatter(formatter)
+    root_logger.addHandler(error_handler)
+    
+    # Capture uncaught exceptions
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        root_logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+    
+    sys.excepthook = handle_exception
+    
+    logging.info(f"📝 Comprehensive logging initialized")
+    logging.info(f"📁 Main log: {log_filepath}")
+    logging.info(f"🚨 Error log: {error_log_filepath}")
+    logging.debug("🔍 Debug logging enabled - all errors will be captured")
 
 
 def get_logger(name):

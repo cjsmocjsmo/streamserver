@@ -1,11 +1,6 @@
-"""Exception classes for the stream server."""
+"""Exception classes for the simple stream server."""
 
 
-class StreamServerError(Exception):
-    """Base exception for stream server errors."""
-    pass
-
-
-class CameraError(StreamServerError):
+class CameraError(Exception):
     """Exception raised for camera-related errors."""
     pass

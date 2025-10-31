@@ -66,7 +66,10 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
         """Handle GET requests."""
         try:
             logger.debug(f"🌐 Handling GET request: {self.path}")
-            if self.path == '/stream.mjpg':
+            # Parse the path to remove query parameters
+            parsed_path = self.path.split('?')[0]
+            
+            if parsed_path == '/stream.mjpg':
                 self._serve_mjpeg_stream()
             else:
                 logger.warning(f"⚠️ 404 - Path not found: {self.path}")

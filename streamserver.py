@@ -37,7 +37,9 @@ class StreamingOutput(io.BufferedIOBase):
         super().__init__()
         self.frame = None
         self.condition = Condition()
-        self._frame_count = 0
+        self.last_frame_time = time.time()
+        self.frame_count = 0
+        self.is_healthy = True
 
     def write(self, buf):
         """Write frame data to the output buffer.
@@ -51,12 +53,124 @@ class StreamingOutput(io.BufferedIOBase):
         try:
             with self.condition:
                 self.frame = buf
-                self._frame_count += 1
+                self.last_frame_time = time.time()
+                self.frame_count += 1
+                self.is_healthy = True
                 self.condition.notify_all()
             return len(buf)
         except Exception as e:
             logger.error(f"❌ Error writing frame data: {e}", exc_info=True)
+            self.is_healthy = False
             raise CameraError(f"Frame write failed: {e}")
+    
+    def check_stream_health(self, max_frame_age=10.0):
+        """Check if the stream is healthy based on frame timing.
+        
+        Args:
+            max_frame_age: Maximum age of last frame in seconds
+            
+        Returns:
+            bool: True if stream is healthy
+        """
+        if not self.is_healthy:
+            return False
+            
+        frame_age = time.time() - self.last_frame_time
+        if frame_age > max_frame_age:
+            logger.warning(f"⚠️ Stream unhealthy: No frames for {frame_age:.1f}s")
+            return False
+            
+        return True
+    
+    def get_stream_stats(self):
+        """Get current stream statistics.
+        
+        Returns:
+            dict: Stream statistics
+        """
+        frame_age = time.time() - self.last_frame_time
+        return {
+            'frame_count': self.frame_count,
+            'last_frame_age': frame_age,
+            'is_healthy': self.is_healthy
+        }
+
+
+class StreamMonitor:
+    """Monitors video stream health and triggers restarts on failures."""
+    
+    def __init__(self, output, restart_callback, check_interval=5.0, max_frame_age=10.0):
+        """Initialize stream monitor.
+        
+        Args:
+            output: StreamingOutput instance to monitor
+            restart_callback: Function to call when restart is needed
+            check_interval: How often to check stream health (seconds)
+            max_frame_age: Maximum age of last frame before considering unhealthy (seconds)
+        """
+        self.output = output
+        self.restart_callback = restart_callback
+        self.check_interval = check_interval
+        self.max_frame_age = max_frame_age
+        self.is_running = False
+        self.monitor_thread = None
+        
+    def start_monitoring(self):
+        """Start the stream monitoring thread."""
+        if self.is_running:
+            logger.warning("⚠️ Stream monitor already running")
+            return
+            
+        self.is_running = True
+        self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        self.monitor_thread.start()
+        logger.info(f"📊 Stream monitor started (check interval: {self.check_interval}s, max frame age: {self.max_frame_age}s)")
+        
+    def stop_monitoring(self):
+        """Stop the stream monitoring thread."""
+        self.is_running = False
+        if self.monitor_thread and self.monitor_thread.is_alive():
+            logger.info("🛑 Stopping stream monitor...")
+            
+    def _monitor_loop(self):
+        """Main monitoring loop."""
+        consecutive_failures = 0
+        max_consecutive_failures = 3
+        
+        while self.is_running:
+            try:
+                time.sleep(self.check_interval)
+                
+                if not self.is_running:
+                    break
+                    
+                # Check stream health
+                is_healthy = self.output.check_stream_health(self.max_frame_age)
+                stats = self.output.get_stream_stats()
+                
+                if is_healthy:
+                    consecutive_failures = 0
+                    if stats['frame_count'] % 600 == 0 and stats['frame_count'] > 0:  # Log every 600 frames (20 seconds at 30fps)
+                        logger.debug(f"📊 Stream healthy: {stats['frame_count']} frames, last frame {stats['last_frame_age']:.1f}s ago")
+                else:
+                    consecutive_failures += 1
+                    logger.error(f"❌ Stream unhealthy (failure #{consecutive_failures}): {stats}")
+                    
+                    if consecutive_failures >= max_consecutive_failures:
+                        logger.critical(f"🚨 Stream failed {consecutive_failures} consecutive checks - triggering restart")
+                        self.restart_callback("Stream health check failed")
+                        break
+                        
+            except Exception as e:
+                consecutive_failures += 1
+                logger.error(f"❌ Stream monitor error (failure #{consecutive_failures}): {e}", exc_info=True)
+                
+                if consecutive_failures >= max_consecutive_failures:
+                    logger.critical(f"🚨 Stream monitor failed {consecutive_failures} times - triggering restart")
+                    self.restart_callback("Stream monitor error")
+                    break
+        
+        logger.info("🛑 Stream monitor stopped")
 
 
 class StreamingHandler(server.BaseHTTPRequestHandler):
@@ -285,10 +399,20 @@ def run_stream_server():
     config = AppConfig()
     restart_count = 0
     max_restarts = 10  # Allow more restarts for camera errors
+    restart_requested = threading.Event()
+    restart_reason = None
+    
+    def request_restart(reason):
+        """Callback function to request a restart."""
+        nonlocal restart_reason
+        restart_reason = reason
+        restart_requested.set()
     
     while True:
         picam2 = None
         server_instance = None
+        stream_monitor = None
+        restart_requested.clear()
         
         try:
             restart_count += 1
@@ -316,6 +440,9 @@ def run_stream_server():
                 # Initialize simple streaming output
                 output = StreamingOutput()
                 logger.info("🔧 Created simple streaming output")
+                
+                # Initialize stream monitor
+                stream_monitor = StreamMonitor(output, request_restart, check_interval=5.0, max_frame_age=10.0)
                 
                 logger.info("📊 Configuration:")
                 logger.info(f"   - Camera resolution: {config.camera.resolution}")
@@ -353,9 +480,25 @@ def run_stream_server():
                 logger.info(f"🌐 Simple stream server started on http://localhost:{config.server.port}/stream.mjpg")
                 logger.info("📹 Direct MJPEG stream available")
                 
+                # Start stream monitoring
+                stream_monitor.start_monitoring()
+                
                 try:
                     logger.debug("🔄 Starting server loop...")
-                    server_instance.serve_forever()
+                    
+                    # Run server in a separate thread so we can monitor for restart requests
+                    server_thread = threading.Thread(target=server_instance.serve_forever, daemon=True)
+                    server_thread.start()
+                    
+                    # Wait for either the server to stop or a restart request
+                    while server_thread.is_alive():
+                        if restart_requested.wait(timeout=1.0):  # Check every second
+                            logger.warning(f"🔄 Restart requested: {restart_reason}")
+                            break
+                            
+                    if restart_requested.is_set():
+                        # Restart was requested by monitor
+                        raise CameraError(f"Stream restart requested: {restart_reason}")
                     
                 except Exception as serve_error:
                     logger.error(f"❌ Server serving error: {serve_error}", exc_info=True)
@@ -382,8 +525,14 @@ def run_stream_server():
             if restart_count >= max_restarts:
                 logger.critical(f"🚨 Too many camera restart attempts ({restart_count}/{max_restarts}) - exiting")
                 break
-            logger.info(f"� Restarting camera and server in 5 seconds... (attempt {restart_count + 1})")
-            time.sleep(5)
+            
+            # Add delay based on error type
+            if "Stream restart requested" in str(camera_error):
+                logger.info(f"🔄 Stream monitor triggered restart - restarting immediately (attempt {restart_count + 1})")
+                time.sleep(1)  # Brief pause for cleanup
+            else:
+                logger.info(f"🔄 Restarting camera and server in 5 seconds... (attempt {restart_count + 1})")
+                time.sleep(5)
         except Exception as e:
             logger.error(f"💥 Unexpected server error - restarting: {e}", exc_info=True)
             if restart_count >= max_restarts:
@@ -392,7 +541,14 @@ def run_stream_server():
             logger.info(f"🔄 Restarting in 5 seconds... (attempt {restart_count + 1})")
             time.sleep(5)
         finally:
-            # Always cleanup camera and server resources
+            # Always cleanup camera, server, and monitor resources
+            if stream_monitor:
+                try:
+                    stream_monitor.stop_monitoring()
+                    logger.debug("🛑 Stream monitor stopped")
+                except Exception as monitor_error:
+                    logger.error(f"❌ Error stopping stream monitor: {monitor_error}", exc_info=True)
+                    
             if picam2:
                 try:
                     logger.debug("🔄 Stopping camera...")

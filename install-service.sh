@@ -5,7 +5,7 @@ echo "Installing Stream Server systemd service..."
 
 # Check if running as root for service installation
 if [[ $EUID -eq 0 ]]; then
-    echo "Error: Don't run this script as root. Run as user 'pipi' and it will use sudo when needed."
+    echo "Error: Don't run this script as root. Run as a regular user and it will use sudo when needed."
     exit 1
 fi
 

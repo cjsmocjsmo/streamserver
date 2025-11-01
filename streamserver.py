@@ -149,13 +149,22 @@ class H264StreamOutput(io.BufferedIOBase):
             
         nal_type = nal_unit[0] & 0x1f
         
+        # Log NAL types for debugging (only occasionally to avoid spam)
+        if self.frame_count % 100 == 0:
+            nal_names = {
+                1: "Non-IDR", 5: "IDR", 6: "SEI", 7: "SPS", 8: "PPS", 
+                9: "AUD", 12: "Filler"
+            }
+            nal_name = nal_names.get(nal_type, f"Unknown({nal_type})")
+            logger.debug(f"📦 NAL unit: {nal_name} (type {nal_type}), size: {len(nal_unit)}")
+        
         # Store SPS and PPS for new clients
         if nal_type == 7:  # SPS
             self.sps = b'\x00\x00\x00\x01' + nal_unit
-            logger.debug("📦 Stored SPS")
+            logger.debug(f"📦 Stored SPS ({len(nal_unit)} bytes)")
         elif nal_type == 8:  # PPS
             self.pps = b'\x00\x00\x00\x01' + nal_unit
-            logger.debug("📦 Stored PPS")
+            logger.debug(f"📦 Stored PPS ({len(nal_unit)} bytes)")
         
         # Send to all clients
         complete_nal = b'\x00\x00\x00\x01' + nal_unit
@@ -317,7 +326,8 @@ class RTSPSession:
             rtp_packet = self._create_rtp_packet(h264_data)
             self.rtp_socket.sendto(rtp_packet, (self.client_addr[0], self.rtp_port))
             self.sequence_number = (self.sequence_number + 1) % 65536
-            self.timestamp += 3600  # 90kHz clock for 25fps
+            # Use more appropriate timestamp increment for H.264 (90kHz clock)
+            self.timestamp = (self.timestamp + 3000) % (2**32)  # ~33ms for 30fps
         except Exception as e:
             logger.debug(f"📱 RTP send failed for session {self.session_id}: {e}")
             raise
@@ -329,7 +339,15 @@ class RTSPSession:
         padding = 0
         extension = 0
         cc = 0
-        marker = 1  # Mark end of frame
+        
+        # Determine marker bit based on NAL type
+        marker = 0
+        if len(payload) > 4:
+            # Check if this is the end of a frame (IDR, non-IDR, or other frame-ending NAL)
+            nal_type = payload[4] & 0x1f if payload[:4] == b'\x00\x00\x00\x01' else payload[0] & 0x1f
+            if nal_type in [1, 5, 6, 7, 8]:  # Common frame-ending NAL types
+                marker = 1
+        
         payload_type = 96  # Dynamic payload type for H.264
         
         header = struct.pack(
@@ -340,6 +358,12 @@ class RTSPSession:
             self.timestamp,
             self.ssrc
         )
+        
+        # For H.264 over RTP, we need to strip the start code if present
+        if payload.startswith(b'\x00\x00\x00\x01'):
+            payload = payload[4:]  # Remove 4-byte start code
+        elif payload.startswith(b'\x00\x00\x01'):
+            payload = payload[3:]  # Remove 3-byte start code
         
         return header + payload
 
@@ -431,17 +455,24 @@ class RTSPHandler:
 
     def _handle_describe(self, request_line):
         """Handle DESCRIBE request."""
-        # Generate SDP (Session Description Protocol)
+        # Get the actual server IP for SDP
+        try:
+            local_ip = get_local_ip()
+        except:
+            local_ip = "0.0.0.0"
+            
+        # Generate SDP (Session Description Protocol) with proper H.264 parameters
         sdp = (
             "v=0\r\n"
-            "o=StreamServer 123456 654321 IN IP4 0.0.0.0\r\n"
+            f"o=StreamServer 123456 654321 IN IP4 {local_ip}\r\n"
             "s=H264 Stream\r\n"
-            "c=IN IP4 0.0.0.0\r\n"
+            f"c=IN IP4 {local_ip}\r\n"
             "t=0 0\r\n"
             "m=video 0 RTP/AVP 96\r\n"
             "a=rtpmap:96 H264/90000\r\n"
-            "a=fmtp:96 profile-level-id=42e01e; sprop-parameter-sets=Z0IAKpY1QPAET8s3AQEBQAAAAAAGkOAAGUAA=,aM4xUg==\r\n"
+            "a=fmtp:96 profile-level-id=42e01e; packetization-mode=1\r\n"
             "a=control:track1\r\n"
+            "a=sendonly\r\n"
         )
         
         content_length = len(sdp.encode())
@@ -510,6 +541,11 @@ class RTSPHandler:
         # Add session to stream output
         self.stream_output.add_client(self.session)
         
+        # Log session details for debugging
+        logger.info(f"📺 Client {self.client_address} started playing stream")
+        logger.debug(f"📡 RTP will be sent to {self.client_address[0]}:{self.session.rtp_port}")
+        logger.debug(f"📡 RTCP will be sent to {self.client_address[0]}:{self.session.rtcp_port}")
+        
         response = (
             f"RTSP/1.0 200 OK\r\n"
             f"CSeq: {self.cseq}\r\n"
@@ -519,7 +555,6 @@ class RTSPHandler:
             f"\r\n"
         )
         self.socket.send(response.encode())
-        logger.info(f"📺 Client {self.client_address} started playing stream")
 
     def _handle_teardown(self):
         """Handle TEARDOWN request."""

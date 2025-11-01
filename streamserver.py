@@ -317,55 +317,90 @@ class RTSPSession:
         self.client_addr = client_socket.getpeername()
         
     def send_h264_data(self, h264_data):
-        """Send H.264 data via RTP."""
+        """Send H.264 data via RTP with proper fragmentation."""
         if not self.is_playing or not self.rtp_socket:
             return
             
         try:
-            # Create RTP packet
-            rtp_packet = self._create_rtp_packet(h264_data)
-            self.rtp_socket.sendto(rtp_packet, (self.client_addr[0], self.rtp_port))
-            self.sequence_number = (self.sequence_number + 1) % 65536
-            # Use more appropriate timestamp increment for H.264 (90kHz clock)
-            self.timestamp = (self.timestamp + 3000) % (2**32)  # ~33ms for 30fps
+            # Strip start code if present
+            if h264_data.startswith(b'\x00\x00\x00\x01'):
+                nal_unit = h264_data[4:]
+            elif h264_data.startswith(b'\x00\x00\x01'):
+                nal_unit = h264_data[3:]
+            else:
+                nal_unit = h264_data
+            
+            if len(nal_unit) == 0:
+                return
+                
+            # RTP payload size limit (MTU 1500 - IP(20) - UDP(8) - RTP(12) = 1460)
+            max_payload_size = 1400
+            
+            if len(nal_unit) <= max_payload_size:
+                # Single NAL unit packet
+                self._send_rtp_packet(nal_unit, True)  # marker = True
+            else:
+                # Fragment large NAL units using FU-A
+                self._send_fragmented_nal(nal_unit)
+                
         except Exception as e:
             logger.debug(f"📱 RTP send failed for session {self.session_id}: {e}")
             raise
 
-    def _create_rtp_packet(self, payload):
-        """Create RTP packet with H.264 payload."""
+    def _send_rtp_packet(self, payload, marker=False):
+        """Send a single RTP packet."""
         # RTP Header (12 bytes)
         version = 2
         padding = 0
         extension = 0
         cc = 0
-        
-        # Determine marker bit based on NAL type
-        marker = 0
-        if len(payload) > 4:
-            # Check if this is the end of a frame (IDR, non-IDR, or other frame-ending NAL)
-            nal_type = payload[4] & 0x1f if payload[:4] == b'\x00\x00\x00\x01' else payload[0] & 0x1f
-            if nal_type in [1, 5, 6, 7, 8]:  # Common frame-ending NAL types
-                marker = 1
-        
         payload_type = 96  # Dynamic payload type for H.264
         
         header = struct.pack(
             '!BBHII',
             (version << 6) | (padding << 5) | (extension << 4) | cc,
-            (marker << 7) | payload_type,
+            (1 if marker else 0) << 7 | payload_type,
             self.sequence_number,
             self.timestamp,
             self.ssrc
         )
         
-        # For H.264 over RTP, we need to strip the start code if present
-        if payload.startswith(b'\x00\x00\x00\x01'):
-            payload = payload[4:]  # Remove 4-byte start code
-        elif payload.startswith(b'\x00\x00\x01'):
-            payload = payload[3:]  # Remove 3-byte start code
+        packet = header + payload
+        self.rtp_socket.sendto(packet, (self.client_addr[0], self.rtp_port))
+        self.sequence_number = (self.sequence_number + 1) % 65536
+
+    def _send_fragmented_nal(self, nal_unit):
+        """Fragment large NAL unit using FU-A."""
+        nal_type = nal_unit[0] & 0x1f
+        nal_nri = nal_unit[0] & 0x60
         
-        return header + payload
+        # FU-A indicator byte
+        fu_indicator = 0x1c | nal_nri  # Type 28 (FU-A)
+        
+        max_fragment_size = 1398  # Account for FU headers
+        nal_payload = nal_unit[1:]  # Skip original NAL header
+        
+        fragments = []
+        offset = 0
+        while offset < len(nal_payload):
+            fragment_size = min(max_fragment_size, len(nal_payload) - offset)
+            fragments.append(nal_payload[offset:offset + fragment_size])
+            offset += fragment_size
+        
+        for i, fragment in enumerate(fragments):
+            # FU-A header byte
+            start_bit = 1 if i == 0 else 0
+            end_bit = 1 if i == len(fragments) - 1 else 0
+            fu_header = (start_bit << 7) | (end_bit << 6) | nal_type
+            
+            # Complete FU-A payload
+            fu_payload = bytes([fu_indicator, fu_header]) + fragment
+            
+            # Send packet (marker bit set only on last fragment)
+            self._send_rtp_packet(fu_payload, marker=(i == len(fragments) - 1))
+        
+        # Update timestamp only after complete frame
+        self.timestamp = (self.timestamp + 3000) % (2**32)
 
     def close(self):
         """Close the session and cleanup resources."""
@@ -461,17 +496,21 @@ class RTSPHandler:
         except:
             local_ip = "0.0.0.0"
             
-        # Generate SDP (Session Description Protocol) with proper H.264 parameters
+        # Generate SDP (Session Description Protocol) optimized for VLC
         sdp = (
             "v=0\r\n"
             f"o=StreamServer 123456 654321 IN IP4 {local_ip}\r\n"
             "s=H264 Stream\r\n"
             f"c=IN IP4 {local_ip}\r\n"
             "t=0 0\r\n"
+            "a=tool:StreamServer\r\n"
+            "a=type:broadcast\r\n"
             "m=video 0 RTP/AVP 96\r\n"
+            "b=AS:1000\r\n"
             "a=rtpmap:96 H264/90000\r\n"
-            "a=fmtp:96 profile-level-id=42e01e; packetization-mode=1\r\n"
+            "a=fmtp:96 profile-level-id=42e01e; packetization-mode=1; sprop-parameter-sets=Z0LAHtkDxWhAAAADAEAAAAwDxYuS,aMuMsg==\r\n"
             "a=control:track1\r\n"
+            "a=framerate:30\r\n"
             "a=sendonly\r\n"
         )
         
@@ -511,10 +550,19 @@ class RTSPHandler:
         self.session.rtp_port = rtp_port
         self.session.rtcp_port = rtcp_port
         
-        # Create RTP socket
+        # Create RTP socket and bind to server
         try:
             self.session.rtp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.session.rtcp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            
+            # Bind to any available port on server side
+            self.session.rtp_socket.bind(('', 0))  # Let system choose port
+            self.session.rtcp_socket.bind(('', 0))
+            
+            # Get the actual server ports that were assigned
+            server_rtp_port = self.session.rtp_socket.getsockname()[1]
+            server_rtcp_port = self.session.rtcp_socket.getsockname()[1]
+            
         except Exception as e:
             logger.error(f"❌ Failed to create RTP sockets: {e}")
             self._send_response(500, "Internal Server Error")
@@ -524,7 +572,7 @@ class RTSPHandler:
             f"RTSP/1.0 200 OK\r\n"
             f"CSeq: {self.cseq}\r\n"
             f"Session: {session_id}\r\n"
-            f"Transport: RTP/AVP/UDP;unicast;client_port={rtp_port}-{rtcp_port}\r\n"
+            f"Transport: RTP/AVP/UDP;unicast;client_port={rtp_port}-{rtcp_port};server_port={server_rtp_port}-{server_rtcp_port}\r\n"
             f"Server: StreamServer/1.0\r\n"
             f"\r\n"
         )

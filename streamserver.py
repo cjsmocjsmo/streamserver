@@ -187,11 +187,21 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                 self._serve_mjpeg_stream()
             else:
                 logger.warning(f"⚠️ 404 - Path not found: {self.path}")
-                self.send_error(404)
+                try:
+                    self.send_error(404)
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    # Client disconnected before we could send 404 - normal behavior
+                    logger.debug(f"📱 Client disconnected before 404 response for: {self.path}")
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as conn_error:
+            # Client disconnected during request handling - normal behavior
+            logger.debug(f"📱 Client disconnected during request handling for {self.path}: {type(conn_error).__name__}")
         except Exception as e:
             logger.error(f"❌ Error handling GET request for {self.path}: {e}", exc_info=True)
             try:
                 self.send_error(500)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                # Client disconnected before we could send 500 - normal behavior
+                logger.debug(f"📱 Client disconnected before 500 response for: {self.path}")
             except Exception as send_error_exc:
                 logger.error(f"❌ Failed to send error response: {send_error_exc}", exc_info=True)
 
@@ -217,29 +227,56 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                         if frame is None:
                             logger.debug("🔄 No frame available, continuing...")
                             continue
+                        
+                        try:
+                            # Write frame data - handle client disconnections gracefully
+                            self.wfile.write(b'--FRAME\r\n')
+                            self.send_header('Content-Type', 'image/jpeg')
+                            self.send_header('Content-Length', len(frame))
+                            self.end_headers()
+                            self.wfile.write(frame)
+                            self.wfile.write(b'\r\n')
                             
-                        self.wfile.write(b'--FRAME\r\n')
-                        self.send_header('Content-Type', 'image/jpeg')
-                        self.send_header('Content-Length', len(frame))
-                        self.end_headers()
-                        self.wfile.write(frame)
-                        self.wfile.write(b'\r\n')
+                        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as conn_error:
+                            # Client disconnected - this is normal, don't log as error
+                            logger.debug(f"📱 Client disconnected after {frame_count} frames: {type(conn_error).__name__}")
+                            break
+                        except OSError as os_error:
+                            # Other socket errors (network issues, etc.)
+                            if os_error.errno in (32, 104, 107):  # Broken pipe, Connection reset, Transport endpoint not connected
+                                logger.debug(f"📱 Client connection lost after {frame_count} frames: {os_error}")
+                                break
+                            else:
+                                # Unexpected OS error
+                                logger.warning(f"⚠️ Network error after {frame_count} frames: {os_error}")
+                                break
                         
                         frame_count += 1
                         if frame_count % 100 == 0:  # Log every 100 frames
                             logger.debug(f"📊 Streamed {frame_count} frames")
                             
+                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as conn_error:
+                        # Client disconnected during frame wait - normal behavior
+                        logger.debug(f"📱 Client disconnected during frame wait after {frame_count} frames: {type(conn_error).__name__}")
+                        break
                     except Exception as frame_error:
-                        logger.error(f"❌ Error processing frame {frame_count}: {frame_error}", exc_info=True)
+                        # Unexpected error during frame processing
+                        logger.error(f"❌ Unexpected error processing frame {frame_count}: {frame_error}", exc_info=True)
                         break
                         
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as stream_conn_error:
+                # Client disconnected during stream setup - normal behavior  
+                logger.debug(f"📱 Client disconnected during stream setup after {frame_count} frames: {type(stream_conn_error).__name__}")
             except Exception as stream_error:
                 logger.error(f"❌ Stream serving error after {frame_count} frames: {stream_error}", exc_info=True)
                 
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as client_disconnect:
+            # Client disconnected during initial setup - normal behavior
+            logger.debug(f"📱 Client disconnected during MJPEG setup: {type(client_disconnect).__name__}")
         except Exception as e:
             logger.error(f"❌ Critical error in MJPEG stream setup: {e}", exc_info=True)
         finally:
-            logger.info(f"🛑 MJPEG stream ended (served {frame_count} frames)")
+            logger.debug(f"🛑 MJPEG stream ended (served {frame_count} frames)")
 
     def log_message(self, format, *args):
         """Override to use our logger instead of stderr."""
@@ -251,6 +288,21 @@ class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
     
     allow_reuse_address = True
     daemon_threads = True
+    
+    def handle_error(self, request, client_address):
+        """Handle errors in request processing."""
+        # Get the exception info
+        import sys
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        
+        # Handle common client disconnection errors gracefully
+        if exc_type in (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            logger.debug(f"📱 Client {client_address} disconnected during request processing: {exc_type.__name__}")
+        elif exc_type and issubclass(exc_type, OSError) and hasattr(exc_value, 'errno') and exc_value.errno in (32, 104, 107):
+            logger.debug(f"📱 Client {client_address} connection lost: {exc_value}")
+        else:
+            # Log unexpected errors
+            logger.error(f"❌ Request handling error for client {client_address}: {exc_value}", exc_info=True)
 
 
 def initialize_camera(config):

@@ -7,6 +7,7 @@ Uses Picamera2 with H.264 hardware encoding for efficient streaming.
 Optimized for Pi 3B+ with support for 2-4 concurrent clients.
 """
 
+import io
 import socket
 import threading
 import time
@@ -32,11 +33,12 @@ from picamera2.encoders import H264Encoder
 from picamera2.outputs import FileOutput
 
 
-class H264StreamOutput:
+class H264StreamOutput(io.BufferedIOBase):
     """Thread-safe H.264 streaming output with NAL unit parsing."""
     
     def __init__(self):
         """Initialize H.264 streaming output."""
+        super().__init__()
         self.clients = []
         self.condition = Condition()
         self.last_frame_time = time.time()
@@ -167,6 +169,29 @@ class H264StreamOutput:
             'is_healthy': self.is_healthy,
             'client_count': len(self.clients)
         }
+
+    # Required BufferedIOBase methods
+    def readable(self):
+        """Return whether object was opened for reading."""
+        return False  # This is a write-only stream
+
+    def writable(self):
+        """Return whether object was opened for writing."""
+        return True
+
+    def seekable(self):
+        """Return whether object supports random access."""
+        return False  # Streaming data, no seeking
+
+    def close(self):
+        """Close the stream and cleanup."""
+        with self.condition:
+            self.clients.clear()
+            self.is_healthy = False
+
+    def flush(self):
+        """Flush write buffers (no-op for streaming)."""
+        pass
 
 
 class StreamMonitor:

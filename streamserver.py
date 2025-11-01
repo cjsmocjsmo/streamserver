@@ -33,6 +33,32 @@ from picamera2.encoders import H264Encoder
 from picamera2.outputs import FileOutput
 
 
+def get_local_ip():
+    """Get the local IP address of the Pi."""
+    try:
+        # Create a socket to determine the local IP
+        # This doesn't actually send data, just determines routing
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            # Connect to a remote address (doesn't matter if it's unreachable)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            return local_ip
+    except Exception:
+        # Fallback methods if the above fails
+        try:
+            import subprocess
+            result = subprocess.run(['hostname', '-I'], capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                # Take the first IP address
+                ip = result.stdout.strip().split()[0]
+                return ip
+        except Exception:
+            pass
+        
+        # Final fallback
+        return "localhost"
+
+
 class H264StreamOutput(io.BufferedIOBase):
     """Thread-safe H.264 streaming output with NAL unit parsing."""
     
@@ -769,10 +795,13 @@ def run_stream_server():
                 
             # Start RTSP server
             try:
+                # Get the actual IP address for display
+                local_ip = get_local_ip()
+                
                 logger.debug(f"📡 Creating RTSP server on {config.server.host}:{config.server.port}")
                 server_instance = RTSPServer(config.server.host, config.server.port, output)
                 
-                logger.info(f"📡 RTSP stream server started on rtsp://localhost:{config.server.port}/stream")
+                logger.info(f"📡 RTSP stream server started on rtsp://{local_ip}:{config.server.port}/stream")
                 logger.info("📹 Hardware H.264 stream available for VLC, FFmpeg, etc.")
                 logger.info("🎯 Optimized for Pi 3B+ with up to 4 concurrent clients")
                 

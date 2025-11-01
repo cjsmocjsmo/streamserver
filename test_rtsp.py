@@ -27,12 +27,12 @@ def test_rtsp_connection():
         sock.settimeout(5.0)
         
         logging.info("🔌 Connecting to RTSP server...")
-        sock.connect(('localhost', 554))
+        sock.connect(('localhost', 8554))
         logging.info("✅ Connected to RTSP server")
         
         # Send OPTIONS request
         options_request = (
-            "OPTIONS rtsp://localhost:554/stream RTSP/1.0\r\n"
+            "OPTIONS rtsp://localhost:8554/stream RTSP/1.0\r\n"
             "CSeq: 1\r\n"
             "User-Agent: TestClient/1.0\r\n"
             "\r\n"
@@ -69,11 +69,11 @@ def test_rtsp_describe():
         sock.settimeout(5.0)
         
         logging.info("🔌 Connecting for DESCRIBE test...")
-        sock.connect(('localhost', 554))
+        sock.connect(('localhost', 8554))
         
         # Send DESCRIBE request
         describe_request = (
-            "DESCRIBE rtsp://localhost:554/stream RTSP/1.0\r\n"
+            "DESCRIBE rtsp://localhost:8554/stream RTSP/1.0\r\n"
             "CSeq: 2\r\n"
             "Accept: application/sdp\r\n"
             "User-Agent: TestClient/1.0\r\n"

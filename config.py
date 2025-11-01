@@ -14,7 +14,7 @@ class CameraConfig:
 class ServerConfig:
     """RTSP server configuration."""
     host = ""  # Bind to all interfaces
-    port = 554  # Standard RTSP port (use 8554 if running as non-root)
+    port = 8554  # Non-privileged RTSP port (554 requires root)
 
 
 @dataclass

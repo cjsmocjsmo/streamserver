@@ -23,7 +23,7 @@ The server is configured in `config.py`:
 
 - **Resolution**: 1280x720 (720p) - optimized for Pi 3B+
 - **Bitrate**: 1Mbps - good balance of quality and bandwidth
-- **Port**: 554 (standard RTSP port, use 8554 for non-root)
+- **Port**: 8554 (non-privileged port, use 554 for standard RTSP if running as root)
 - **Format**: YUV420 (required for H.264)
 
 ## Usage
@@ -52,30 +52,30 @@ sudo journalctl -u streamserver -f
 
 The RTSP stream is available at:
 ```
-rtsp://[PI_IP_ADDRESS]:554/stream
+rtsp://[PI_IP_ADDRESS]:8554/stream
 ```
 
 **VLC Media Player:**
 1. Open VLC
 2. Go to Media → Open Network Stream
-3. Enter: `rtsp://192.168.1.100:554/stream` (replace with your Pi's IP)
+3. Enter: `rtsp://192.168.1.100:8554/stream` (replace with your Pi's IP)
 4. Click Play
 
 **FFmpeg (for recording or re-streaming):**
 ```bash
 # View stream
-ffplay rtsp://192.168.1.100:554/stream
+ffplay rtsp://192.168.1.100:8554/stream
 
 # Record to file
-ffmpeg -i rtsp://192.168.1.100:554/stream -c copy output.mp4
+ffmpeg -i rtsp://192.168.1.100:8554/stream -c copy output.mp4
 
 # Re-stream to YouTube Live
-ffmpeg -i rtsp://192.168.1.100:554/stream -c copy -f flv rtmp://a.rtmp.youtube.com/live2/YOUR_STREAM_KEY
+ffmpeg -i rtsp://192.168.1.100:8554/stream -c copy -f flv rtmp://a.rtmp.youtube.com/live2/YOUR_STREAM_KEY
 ```
 
 **OBS Studio:**
 1. Add Source → Media Source
-2. Input: `rtsp://192.168.1.100:554/stream`
+2. Input: `rtsp://192.168.1.100:8554/stream`
 3. Uncheck "Local File"
 
 ## Performance Optimization
@@ -86,21 +86,23 @@ ffmpeg -i rtsp://192.168.1.100:554/stream -c copy -f flv rtmp://a.rtmp.youtube.c
 - Concurrent clients: 2-4 maximum
 
 ### Port Configuration:
-- **Port 554**: Standard RTSP port (requires root or capabilities)
-- **Port 8554**: Alternative for non-root operation
+- **Port 8554**: Default non-privileged port (recommended)
+- **Port 554**: Standard RTSP port (requires root privileges)
 
-To use port 8554, update `config.py`:
+To use standard port 554, update `config.py`:
 ```python
 @dataclass
 class ServerConfig:
     host = ""
-    port = 8554  # Non-root port
+    port = 554  # Standard RTSP port (requires root)
 ```
+
+**Note**: Port 8554 is used by default to avoid permission issues. Most RTSP clients work perfectly with non-standard ports.
 
 ## Troubleshooting
 
 ### Connection Issues:
-1. Check firewall: `sudo ufw allow 554` or `sudo ufw allow 8554`
+1. Check firewall: `sudo ufw allow 8554`
 2. Verify Pi's IP address: `ip addr show`
 3. Test locally: `python3 test_rtsp.py`
 

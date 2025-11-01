@@ -655,11 +655,11 @@ def start_camera_streaming(picam2, encoder, output):
         
         logger.info("🔧 Starting camera streaming with H.264 encoding")
         try:
-            # Set up encoder output to our stream
-            encoder.output = FileOutput(output)
+            # Wrap our H.264 output in FileOutput for Picamera2
+            file_output = FileOutput(output)
             
-            # Start recording with H.264 encoder
-            picam2.start_recording(encoder)
+            # Start recording with H.264 encoder and wrapped output
+            picam2.start_recording(encoder, file_output)
             logger.info("✅ Camera started with hardware H.264 encoding")
             return True
             

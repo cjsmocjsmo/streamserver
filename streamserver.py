@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
-Simple MJPEG Stream Server
+RTSP Stream Server
 
-A minimal video streaming server for Raspberry Pi camera.
-Serves only the raw video stream without any analysis or recording.
+A hardware-accelerated RTSP streaming server for Raspberry Pi camera.
+Uses Picamera2 with H.264 hardware encoding for efficient streaming.
+Optimized for Pi 3B+ with support for 2-4 concurrent clients.
 """
 
-import io
-import socketserver
+import socket
 import threading
 import time
-from http import server
-from threading import Condition
+import struct
+import random
+from threading import Condition, Event
 
 # Local imports
 from config import AppConfig
@@ -27,51 +28,126 @@ if not verify_picamera2():
     raise ImportError("Picamera2 is required but not available")
 
 from picamera2 import Picamera2
+from picamera2.encoders import H264Encoder
+from picamera2.outputs import FileOutput
 
 
-class StreamingOutput(io.BufferedIOBase):
-    """Thread-safe streaming output for video frames."""
+class H264StreamOutput:
+    """Thread-safe H.264 streaming output with NAL unit parsing."""
     
     def __init__(self):
-        """Initialize streaming output."""
-        super().__init__()
-        self.frame = None
+        """Initialize H.264 streaming output."""
+        self.clients = []
         self.condition = Condition()
         self.last_frame_time = time.time()
         self.frame_count = 0
         self.is_healthy = True
+        self.sps = None  # Sequence Parameter Set
+        self.pps = None  # Picture Parameter Set
+        self.current_nal = b''
+        self.buffer = b''
 
-    def write(self, buf):
-        """Write frame data to the output buffer.
-        
-        Args:
-            buf: Frame data bytes
+    def add_client(self, client):
+        """Add a client to receive H.264 stream."""
+        with self.condition:
+            self.clients.append(client)
+            logger.debug(f"📱 Client added. Total clients: {len(self.clients)}")
             
-        Returns:
-            int: Number of bytes written
-        """
+            # Send SPS/PPS to new client if available
+            if self.sps and self.pps:
+                try:
+                    client.send_h264_data(self.sps)
+                    client.send_h264_data(self.pps)
+                    logger.debug("📦 Sent SPS/PPS to new client")
+                except Exception as e:
+                    logger.debug(f"⚠️ Failed to send SPS/PPS to new client: {e}")
+
+    def remove_client(self, client):
+        """Remove a client from the stream."""
+        with self.condition:
+            if client in self.clients:
+                self.clients.remove(client)
+                logger.debug(f"📱 Client removed. Total clients: {len(self.clients)}")
+
+    def write(self, data):
+        """Write H.264 data and distribute to clients."""
         try:
+            self.buffer += data
+            self._process_nal_units()
+            
             with self.condition:
-                self.frame = buf
                 self.last_frame_time = time.time()
                 self.frame_count += 1
                 self.is_healthy = True
-                self.condition.notify_all()
-            return len(buf)
+                
+            return len(data)
         except Exception as e:
-            logger.error(f"❌ Error writing frame data: {e}", exc_info=True)
+            logger.error(f"❌ Error writing H.264 data: {e}", exc_info=True)
             self.is_healthy = False
-            raise CameraError(f"Frame write failed: {e}")
-    
-    def check_stream_health(self, max_frame_age=10.0):
-        """Check if the stream is healthy based on frame timing.
-        
-        Args:
-            max_frame_age: Maximum age of last frame in seconds
+            raise CameraError(f"H.264 write failed: {e}")
+
+    def _process_nal_units(self):
+        """Process NAL units from the buffer."""
+        while len(self.buffer) >= 4:
+            # Look for NAL unit start code (0x00000001)
+            start_code_pos = self.buffer.find(b'\x00\x00\x00\x01')
+            if start_code_pos == -1:
+                # No start code found, keep last 3 bytes in buffer
+                self.buffer = self.buffer[-3:]
+                break
+                
+            if start_code_pos > 0:
+                # Found start code, but not at beginning - skip invalid data
+                self.buffer = self.buffer[start_code_pos:]
+                continue
+                
+            # Look for next start code to determine NAL unit length
+            next_start = self.buffer.find(b'\x00\x00\x00\x01', 4)
+            if next_start == -1:
+                # No complete NAL unit yet
+                break
+                
+            # Extract complete NAL unit
+            nal_unit = self.buffer[4:next_start]
+            self.buffer = self.buffer[next_start:]
             
-        Returns:
-            bool: True if stream is healthy
-        """
+            if nal_unit:
+                self._handle_nal_unit(nal_unit)
+
+    def _handle_nal_unit(self, nal_unit):
+        """Handle a complete NAL unit."""
+        if not nal_unit:
+            return
+            
+        nal_type = nal_unit[0] & 0x1f
+        
+        # Store SPS and PPS for new clients
+        if nal_type == 7:  # SPS
+            self.sps = b'\x00\x00\x00\x01' + nal_unit
+            logger.debug("📦 Stored SPS")
+        elif nal_type == 8:  # PPS
+            self.pps = b'\x00\x00\x00\x01' + nal_unit
+            logger.debug("📦 Stored PPS")
+        
+        # Send to all clients
+        complete_nal = b'\x00\x00\x00\x01' + nal_unit
+        clients_to_remove = []
+        
+        with self.condition:
+            for client in self.clients[:]:  # Copy list to avoid modification during iteration
+                try:
+                    client.send_h264_data(complete_nal)
+                except Exception as e:
+                    logger.debug(f"📱 Client disconnected: {e}")
+                    clients_to_remove.append(client)
+            
+            # Remove disconnected clients
+            for client in clients_to_remove:
+                if client in self.clients:
+                    self.clients.remove(client)
+
+    def check_stream_health(self, max_frame_age=10.0):
+        """Check if the stream is healthy."""
         if not self.is_healthy:
             return False
             
@@ -83,16 +159,13 @@ class StreamingOutput(io.BufferedIOBase):
         return True
     
     def get_stream_stats(self):
-        """Get current stream statistics.
-        
-        Returns:
-            dict: Stream statistics
-        """
+        """Get current stream statistics."""
         frame_age = time.time() - self.last_frame_time
         return {
             'frame_count': self.frame_count,
             'last_frame_age': frame_age,
-            'is_healthy': self.is_healthy
+            'is_healthy': self.is_healthy,
+            'client_count': len(self.clients)
         }
 
 
@@ -100,14 +173,7 @@ class StreamMonitor:
     """Monitors video stream health and triggers restarts on failures."""
     
     def __init__(self, output, restart_callback, check_interval=5.0, max_frame_age=10.0):
-        """Initialize stream monitor.
-        
-        Args:
-            output: StreamingOutput instance to monitor
-            restart_callback: Function to call when restart is needed
-            check_interval: How often to check stream health (seconds)
-            max_frame_age: Maximum age of last frame before considering unhealthy (seconds)
-        """
+        """Initialize stream monitor."""
         self.output = output
         self.restart_callback = restart_callback
         self.check_interval = check_interval
@@ -150,8 +216,8 @@ class StreamMonitor:
                 
                 if is_healthy:
                     consecutive_failures = 0
-                    if stats['frame_count'] % 600 == 0 and stats['frame_count'] > 0:  # Log every 600 frames (20 seconds at 30fps)
-                        logger.debug(f"📊 Stream healthy: {stats['frame_count']} frames, last frame {stats['last_frame_age']:.1f}s ago")
+                    if stats['frame_count'] % 600 == 0 and stats['frame_count'] > 0:  # Log every 600 frames
+                        logger.debug(f"📊 Stream healthy: {stats['frame_count']} frames, {stats['client_count']} clients, last frame {stats['last_frame_age']:.1f}s ago")
                 else:
                     consecutive_failures += 1
                     logger.error(f"❌ Stream unhealthy (failure #{consecutive_failures}): {stats}")
@@ -173,166 +239,369 @@ class StreamMonitor:
         logger.info("🛑 Stream monitor stopped")
 
 
-class StreamingHandler(server.BaseHTTPRequestHandler):
-    """HTTP handler for video streaming."""
+class RTSPSession:
+    """Represents an RTSP client session."""
     
-    def do_GET(self):
-        """Handle GET requests."""
-        try:
-            logger.debug(f"🌐 Handling GET request: {self.path}")
-            # Parse the path to remove query parameters
-            parsed_path = self.path.split('?')[0]
-            
-            if parsed_path == '/stream.mjpg':
-                self._serve_mjpeg_stream()
-            else:
-                logger.warning(f"⚠️ 404 - Path not found: {self.path}")
-                try:
-                    self.send_error(404)
-                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-                    # Client disconnected before we could send 404 - normal behavior
-                    logger.debug(f"📱 Client disconnected before 404 response for: {self.path}")
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as conn_error:
-            # Client disconnected during request handling - normal behavior
-            logger.debug(f"📱 Client disconnected during request handling for {self.path}: {type(conn_error).__name__}")
-        except Exception as e:
-            logger.error(f"❌ Error handling GET request for {self.path}: {e}", exc_info=True)
-            try:
-                self.send_error(500)
-            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-                # Client disconnected before we could send 500 - normal behavior
-                logger.debug(f"📱 Client disconnected before 500 response for: {self.path}")
-            except Exception as send_error_exc:
-                logger.error(f"❌ Failed to send error response: {send_error_exc}", exc_info=True)
-
-    def _serve_mjpeg_stream(self):
-        """Serve the MJPEG video stream."""
-        frame_count = 0  # Initialize at the start to avoid UnboundLocalError
-        try:
-            logger.debug("🎥 Starting MJPEG stream serve")
-            self.send_response(200)
-            self.send_header('Age', 0)
-            self.send_header('Cache-Control', 'no-cache, private')
-            self.send_header('Pragma', 'no-cache')
-            self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=FRAME')
-            self.end_headers()
-            
-            try:
-                while True:
-                    try:
-                        with output.condition:
-                            output.condition.wait(timeout=5.0)  # Add timeout to prevent hanging
-                            frame = output.frame
-                            
-                        if frame is None:
-                            logger.debug("🔄 No frame available, continuing...")
-                            continue
-                        
-                        try:
-                            # Write frame data - handle client disconnections gracefully
-                            self.wfile.write(b'--FRAME\r\n')
-                            self.send_header('Content-Type', 'image/jpeg')
-                            self.send_header('Content-Length', len(frame))
-                            self.end_headers()
-                            self.wfile.write(frame)
-                            self.wfile.write(b'\r\n')
-                            
-                        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as conn_error:
-                            # Client disconnected - this is normal, don't log as error
-                            logger.debug(f"📱 Client disconnected after {frame_count} frames: {type(conn_error).__name__}")
-                            break
-                        except OSError as os_error:
-                            # Other socket errors (network issues, etc.)
-                            if os_error.errno in (32, 104, 107):  # Broken pipe, Connection reset, Transport endpoint not connected
-                                logger.debug(f"📱 Client connection lost after {frame_count} frames: {os_error}")
-                                break
-                            else:
-                                # Unexpected OS error
-                                logger.warning(f"⚠️ Network error after {frame_count} frames: {os_error}")
-                                break
-                        
-                        frame_count += 1
-                        if frame_count % 100 == 0:  # Log every 100 frames
-                            logger.debug(f"📊 Streamed {frame_count} frames")
-                            
-                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as conn_error:
-                        # Client disconnected during frame wait - normal behavior
-                        logger.debug(f"📱 Client disconnected during frame wait after {frame_count} frames: {type(conn_error).__name__}")
-                        break
-                    except Exception as frame_error:
-                        # Unexpected error during frame processing
-                        logger.error(f"❌ Unexpected error processing frame {frame_count}: {frame_error}", exc_info=True)
-                        break
-                        
-            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as stream_conn_error:
-                # Client disconnected during stream setup - normal behavior  
-                logger.debug(f"📱 Client disconnected during stream setup after {frame_count} frames: {type(stream_conn_error).__name__}")
-            except Exception as stream_error:
-                logger.error(f"❌ Stream serving error after {frame_count} frames: {stream_error}", exc_info=True)
-                
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as client_disconnect:
-            # Client disconnected during initial setup - normal behavior
-            logger.debug(f"📱 Client disconnected during MJPEG setup: {type(client_disconnect).__name__}")
-        except Exception as e:
-            logger.error(f"❌ Critical error in MJPEG stream setup: {e}", exc_info=True)
-        finally:
-            logger.debug(f"🛑 MJPEG stream ended (served {frame_count} frames)")
-
-    def log_message(self, format, *args):
-        """Override to use our logger instead of stderr."""
-        logger.debug(f"HTTP: {format % args}")
-
-
-class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
-    """Multi-threaded HTTP server for video streaming."""
-    
-    allow_reuse_address = True
-    daemon_threads = True
-    
-    def handle_error(self, request, client_address):
-        """Handle errors in request processing."""
-        # Get the exception info
-        import sys
-        exc_type, exc_value, exc_traceback = sys.exc_info()
+    def __init__(self, client_socket, session_id):
+        """Initialize RTSP session."""
+        self.socket = client_socket
+        self.session_id = session_id
+        self.rtp_port = None
+        self.rtcp_port = None
+        self.rtp_socket = None
+        self.rtcp_socket = None
+        self.sequence_number = random.randint(0, 65535)
+        self.timestamp = 0
+        self.ssrc = random.randint(0, 0xFFFFFFFF)
+        self.is_playing = False
+        self.client_addr = client_socket.getpeername()
         
-        # Handle common client disconnection errors gracefully
-        if exc_type in (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-            logger.debug(f"📱 Client {client_address} disconnected during request processing: {exc_type.__name__}")
-        elif exc_type and issubclass(exc_type, OSError) and hasattr(exc_value, 'errno') and exc_value.errno in (32, 104, 107):
-            logger.debug(f"📱 Client {client_address} connection lost: {exc_value}")
+    def send_h264_data(self, h264_data):
+        """Send H.264 data via RTP."""
+        if not self.is_playing or not self.rtp_socket:
+            return
+            
+        try:
+            # Create RTP packet
+            rtp_packet = self._create_rtp_packet(h264_data)
+            self.rtp_socket.sendto(rtp_packet, (self.client_addr[0], self.rtp_port))
+            self.sequence_number = (self.sequence_number + 1) % 65536
+            self.timestamp += 3600  # 90kHz clock for 25fps
+        except Exception as e:
+            logger.debug(f"📱 RTP send failed for session {self.session_id}: {e}")
+            raise
+
+    def _create_rtp_packet(self, payload):
+        """Create RTP packet with H.264 payload."""
+        # RTP Header (12 bytes)
+        version = 2
+        padding = 0
+        extension = 0
+        cc = 0
+        marker = 1  # Mark end of frame
+        payload_type = 96  # Dynamic payload type for H.264
+        
+        header = struct.pack(
+            '!BBHII',
+            (version << 6) | (padding << 5) | (extension << 4) | cc,
+            (marker << 7) | payload_type,
+            self.sequence_number,
+            self.timestamp,
+            self.ssrc
+        )
+        
+        return header + payload
+
+    def close(self):
+        """Close the session and cleanup resources."""
+        try:
+            if self.rtp_socket:
+                self.rtp_socket.close()
+                self.rtp_socket = None
+            if self.rtcp_socket:
+                self.rtcp_socket.close()
+                self.rtcp_socket = None
+            if self.socket:
+                self.socket.close()
+                self.socket = None
+        except Exception as e:
+            logger.debug(f"Session cleanup error: {e}")
+
+
+class RTSPHandler:
+    """RTSP request handler."""
+    
+    def __init__(self, socket_conn, client_address, stream_output):
+        """Initialize RTSP handler."""
+        self.socket = socket_conn
+        self.client_address = client_address
+        self.stream_output = stream_output
+        self.session = None
+        self.cseq = 0
+        
+    def handle_request(self):
+        """Handle RTSP requests."""
+        try:
+            while True:
+                # Receive request
+                data = self.socket.recv(4096)
+                if not data:
+                    break
+                    
+                request = data.decode('utf-8', errors='ignore')
+                logger.debug(f"📡 RTSP Request from {self.client_address}: {request.split()[0] if request.split() else 'EMPTY'}")
+                
+                # Parse request
+                lines = request.strip().split('\r\n')
+                if not lines:
+                    continue
+                    
+                request_line = lines[0]
+                headers = {}
+                
+                for line in lines[1:]:
+                    if ':' in line:
+                        key, value = line.split(':', 1)
+                        headers[key.strip().lower()] = value.strip()
+                
+                # Extract CSeq
+                self.cseq = int(headers.get('cseq', '0'))
+                
+                # Handle different RTSP methods
+                if request_line.startswith('OPTIONS'):
+                    self._handle_options()
+                elif request_line.startswith('DESCRIBE'):
+                    self._handle_describe(request_line)
+                elif request_line.startswith('SETUP'):
+                    self._handle_setup(headers)
+                elif request_line.startswith('PLAY'):
+                    self._handle_play()
+                elif request_line.startswith('TEARDOWN'):
+                    self._handle_teardown()
+                    break
+                else:
+                    self._send_response(501, "Not Implemented")
+                    
+        except Exception as e:
+            logger.debug(f"📱 RTSP handler error for {self.client_address}: {e}")
+        finally:
+            self._cleanup()
+
+    def _handle_options(self):
+        """Handle OPTIONS request."""
+        response = (
+            f"RTSP/1.0 200 OK\r\n"
+            f"CSeq: {self.cseq}\r\n"
+            f"Public: OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN\r\n"
+            f"Server: StreamServer/1.0\r\n"
+            f"\r\n"
+        )
+        self.socket.send(response.encode())
+
+    def _handle_describe(self, request_line):
+        """Handle DESCRIBE request."""
+        # Generate SDP (Session Description Protocol)
+        sdp = (
+            "v=0\r\n"
+            "o=StreamServer 123456 654321 IN IP4 0.0.0.0\r\n"
+            "s=H264 Stream\r\n"
+            "c=IN IP4 0.0.0.0\r\n"
+            "t=0 0\r\n"
+            "m=video 0 RTP/AVP 96\r\n"
+            "a=rtpmap:96 H264/90000\r\n"
+            "a=fmtp:96 profile-level-id=42e01e; sprop-parameter-sets=Z0IAKpY1QPAET8s3AQEBQAAAAAAGkOAAGUAA=,aM4xUg==\r\n"
+            "a=control:track1\r\n"
+        )
+        
+        content_length = len(sdp.encode())
+        response = (
+            f"RTSP/1.0 200 OK\r\n"
+            f"CSeq: {self.cseq}\r\n"
+            f"Content-Type: application/sdp\r\n"
+            f"Content-Length: {content_length}\r\n"
+            f"Server: StreamServer/1.0\r\n"
+            f"\r\n"
+            f"{sdp}"
+        )
+        self.socket.send(response.encode())
+
+    def _handle_setup(self, headers):
+        """Handle SETUP request."""
+        transport = headers.get('transport', '')
+        
+        # Parse client ports
+        client_port_match = None
+        if 'client_port=' in transport:
+            port_part = transport.split('client_port=')[1].split(';')[0]
+            if '-' in port_part:
+                rtp_port, rtcp_port = map(int, port_part.split('-'))
+            else:
+                rtp_port = int(port_part)
+                rtcp_port = rtp_port + 1
         else:
-            # Log unexpected errors
-            logger.error(f"❌ Request handling error for client {client_address}: {exc_value}", exc_info=True)
+            # Default ports
+            rtp_port = 5004
+            rtcp_port = 5005
+
+        # Create session
+        session_id = str(random.randint(100000, 999999))
+        self.session = RTSPSession(self.socket, session_id)
+        self.session.rtp_port = rtp_port
+        self.session.rtcp_port = rtcp_port
+        
+        # Create RTP socket
+        try:
+            self.session.rtp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.session.rtcp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        except Exception as e:
+            logger.error(f"❌ Failed to create RTP sockets: {e}")
+            self._send_response(500, "Internal Server Error")
+            return
+
+        response = (
+            f"RTSP/1.0 200 OK\r\n"
+            f"CSeq: {self.cseq}\r\n"
+            f"Session: {session_id}\r\n"
+            f"Transport: RTP/AVP/UDP;unicast;client_port={rtp_port}-{rtcp_port}\r\n"
+            f"Server: StreamServer/1.0\r\n"
+            f"\r\n"
+        )
+        self.socket.send(response.encode())
+
+    def _handle_play(self):
+        """Handle PLAY request."""
+        if not self.session:
+            self._send_response(455, "Method Not Valid in This State")
+            return
+            
+        self.session.is_playing = True
+        
+        # Add session to stream output
+        self.stream_output.add_client(self.session)
+        
+        response = (
+            f"RTSP/1.0 200 OK\r\n"
+            f"CSeq: {self.cseq}\r\n"
+            f"Session: {self.session.session_id}\r\n"
+            f"Range: npt=0-\r\n"
+            f"Server: StreamServer/1.0\r\n"
+            f"\r\n"
+        )
+        self.socket.send(response.encode())
+        logger.info(f"📺 Client {self.client_address} started playing stream")
+
+    def _handle_teardown(self):
+        """Handle TEARDOWN request."""
+        if self.session:
+            self.session.is_playing = False
+            self.stream_output.remove_client(self.session)
+            
+        response = (
+            f"RTSP/1.0 200 OK\r\n"
+            f"CSeq: {self.cseq}\r\n"
+            f"Server: StreamServer/1.0\r\n"
+            f"\r\n"
+        )
+        self.socket.send(response.encode())
+        logger.info(f"📺 Client {self.client_address} stopped stream")
+
+    def _send_response(self, code, reason):
+        """Send RTSP response."""
+        response = (
+            f"RTSP/1.0 {code} {reason}\r\n"
+            f"CSeq: {self.cseq}\r\n"
+            f"Server: StreamServer/1.0\r\n"
+            f"\r\n"
+        )
+        self.socket.send(response.encode())
+
+    def _cleanup(self):
+        """Cleanup handler resources."""
+        if self.session:
+            self.stream_output.remove_client(self.session)
+            self.session.close()
+        try:
+            self.socket.close()
+        except:
+            pass
+
+
+class RTSPServer:
+    """RTSP server for H.264 streaming."""
+    
+    def __init__(self, host, port, stream_output):
+        """Initialize RTSP server."""
+        self.host = host
+        self.port = port
+        self.stream_output = stream_output
+        self.socket = None
+        self.is_running = False
+        
+    def start(self):
+        """Start the RTSP server."""
+        try:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.socket.bind((self.host, self.port))
+            self.socket.listen(5)
+            self.is_running = True
+            
+            logger.info(f"📡 RTSP server started on rtsp://{self.host or 'localhost'}:{self.port}/stream")
+            
+            while self.is_running:
+                try:
+                    client_socket, client_address = self.socket.accept()
+                    logger.debug(f"📱 RTSP client connected: {client_address}")
+                    
+                    # Handle client in separate thread
+                    handler_thread = threading.Thread(
+                        target=self._handle_client,
+                        args=(client_socket, client_address),
+                        daemon=True
+                    )
+                    handler_thread.start()
+                    
+                except Exception as e:
+                    if self.is_running:
+                        logger.error(f"❌ Error accepting RTSP connection: {e}")
+                        
+        except Exception as e:
+            logger.error(f"❌ RTSP server error: {e}", exc_info=True)
+            raise
+
+    def _handle_client(self, client_socket, client_address):
+        """Handle RTSP client connection."""
+        handler = RTSPHandler(client_socket, client_address, self.stream_output)
+        handler.handle_request()
+        
+    def stop(self):
+        """Stop the RTSP server."""
+        self.is_running = False
+        if self.socket:
+            try:
+                self.socket.close()
+                logger.info("📡 RTSP server stopped")
+            except Exception as e:
+                logger.error(f"❌ Error stopping RTSP server: {e}")
 
 
 def initialize_camera(config):
-    """Initialize and configure the camera.
+    """Initialize and configure the camera with H.264 encoding.
     
     Args:
         config: Application configuration
         
     Returns:
-        Picamera2: Configured camera instance
+        tuple: (Picamera2 instance, H264Encoder instance)
         
     Raises:
         CameraError: If camera initialization fails
     """
     try:
-        logger.info("📷 Initializing Picamera2...")
+        logger.info("📷 Initializing Picamera2 with H.264 hardware encoding...")
         picam2 = Picamera2()
         
         try:
-            # Configure camera
+            # Configure camera for H.264 encoding
             logger.debug(f"📐 Creating video configuration for {config.camera.resolution}")
+            
+            # Use lower resolution for Pi 3B+ efficiency - can be adjusted in config
             video_config = picam2.create_video_configuration(
-                main={"size": config.camera.resolution, "format": config.camera.format}
+                main={"size": config.camera.resolution, "format": "YUV420"}
             )
             
             logger.debug("🔧 Configuring camera with video config")
             picam2.configure(video_config)
             
-            logger.info(f"✅ Camera initialized: {config.camera.resolution}")
-            return picam2
+            # Create H.264 encoder with Pi 3B+ optimized settings
+            encoder = H264Encoder(
+                bitrate=1000000,  # 1Mbps - good balance for Pi 3B+
+                repeat=True,
+                iperiod=30  # I-frame every 30 frames (1 second at 30fps)
+            )
+            
+            logger.info(f"✅ Camera initialized: {config.camera.resolution} with H.264 hardware encoding")
+            return picam2, encoder
             
         except Exception as config_error:
             logger.error(f"❌ Camera configuration failed: {config_error}", exc_info=True)
@@ -343,12 +612,13 @@ def initialize_camera(config):
         raise CameraError(f"Failed to initialize camera: {e}")
 
 
-def start_camera_streaming(picam2, output):
-    """Start camera streaming.
+def start_camera_streaming(picam2, encoder, output):
+    """Start camera streaming with H.264 encoding.
     
     Args:
         picam2: Camera instance
-        output: Streaming output
+        encoder: H.264 encoder instance
+        output: H264StreamOutput instance
         
     Returns:
         bool: True if camera started successfully
@@ -358,85 +628,18 @@ def start_camera_streaming(picam2, output):
             logger.error("❌ Output is None - cannot start camera")
             return False
         
-        logger.info("🔧 Starting camera streaming")
+        logger.info("🔧 Starting camera streaming with H.264 encoding")
         try:
-            picam2.start()
-            logger.debug("✅ Camera started successfully")
-        except Exception as start_error:
-            logger.error(f"❌ Failed to start camera: {start_error}", exc_info=True)
-            return False
-        
-        # Start frame capture thread
-        def capture_frames():
-            """Capture frames and send to output."""
-            try:
-                try:
-                    import cv2  # Import only when needed for JPEG encoding
-                    logger.debug("📦 OpenCV imported for JPEG encoding")
-                except ImportError as import_error:
-                    logger.error(f"❌ OpenCV required for JPEG encoding: {import_error}", exc_info=True)
-                    raise CameraError(f"OpenCV import failed: {import_error}")
-                    
-                frame_count = 0
-                consecutive_errors = 0
-                max_consecutive_errors = 10  # Restart camera after 10 consecutive errors
-                
-                while True:
-                    try:
-                        # Capture JPEG frame
-                        frame_data = picam2.capture_array("main")
-                        if frame_data is not None:
-                            try:
-                                # Convert to JPEG
-                                _, jpeg_data = cv2.imencode('.jpg', frame_data)
-                                # Send to output
-                                output.write(jpeg_data.tobytes())
-                                
-                                frame_count += 1
-                                consecutive_errors = 0  # Reset error counter on successful frame
-                                
-                                if frame_count % 300 == 0:  # Log every 300 frames (10 seconds at 30fps)
-                                    logger.debug(f"📸 Captured {frame_count} frames")
-                                    
-                            except Exception as encode_error:
-                                consecutive_errors += 1
-                                logger.error(f"❌ Frame encoding error at frame {frame_count} (consecutive errors: {consecutive_errors}): {encode_error}", exc_info=True)
-                                if consecutive_errors >= max_consecutive_errors:
-                                    raise CameraError(f"Too many consecutive encoding errors ({consecutive_errors})")
-                        else:
-                            consecutive_errors += 1
-                            logger.warning(f"⚠️ No frame data received (consecutive errors: {consecutive_errors})")
-                            if consecutive_errors >= max_consecutive_errors:
-                                raise CameraError(f"Too many consecutive null frames ({consecutive_errors})")
-                                
-                        time.sleep(1/30)  # 30 FPS
-                        
-                    except CameraError:
-                        # Re-raise camera errors to trigger restart
-                        raise
-                    except Exception as capture_error:
-                        consecutive_errors += 1
-                        logger.error(f"❌ Frame capture error at frame {frame_count} (consecutive errors: {consecutive_errors}): {capture_error}", exc_info=True)
-                        if consecutive_errors >= max_consecutive_errors:
-                            raise CameraError(f"Too many consecutive capture errors ({consecutive_errors})")
-                        time.sleep(0.1)  # Brief pause before retry
-                        
-            except CameraError:
-                # Re-raise camera errors to trigger restart
-                raise
-            except Exception as thread_error:
-                logger.error(f"❌ Capture thread error: {thread_error}", exc_info=True)
-                raise CameraError(f"Capture thread failed: {thread_error}")
-        
-        try:
-            # Start capture thread
-            capture_thread = threading.Thread(target=capture_frames, daemon=True)
-            capture_thread.start()
-            logger.info("✅ Camera streaming started with capture thread")
+            # Set up encoder output to our stream
+            encoder.output = FileOutput(output)
+            
+            # Start recording with H.264 encoder
+            picam2.start_recording(encoder)
+            logger.info("✅ Camera started with hardware H.264 encoding")
             return True
             
-        except Exception as thread_start_error:
-            logger.error(f"❌ Failed to start capture thread: {thread_start_error}", exc_info=True)
+        except Exception as start_error:
+            logger.error(f"❌ Failed to start camera recording: {start_error}", exc_info=True)
             return False
             
     except Exception as e:
@@ -444,14 +647,28 @@ def start_camera_streaming(picam2, output):
         return False
 
 
+def stop_camera_streaming(picam2):
+    """Stop camera streaming.
+    
+    Args:
+        picam2: Camera instance
+    """
+    try:
+        if picam2:
+            logger.debug("🛑 Stopping camera recording...")
+            picam2.stop_recording()
+            logger.debug("📹 Camera recording stopped")
+    except Exception as e:
+        logger.warning(f"⚠️ Error stopping camera recording: {e}")
+
+
 def run_stream_server():
-    """Main server loop for simple streaming."""
-    global output
+    """Main server loop for RTSP streaming."""
     
     config = AppConfig()
     restart_count = 0
-    max_restarts = 10  # Allow more restarts for camera errors
-    restart_requested = threading.Event()
+    max_restarts = 10
+    restart_requested = Event()
     restart_reason = None
     
     def request_restart(reason):
@@ -462,13 +679,14 @@ def run_stream_server():
     
     while True:
         picam2 = None
+        encoder = None
         server_instance = None
         stream_monitor = None
         restart_requested.clear()
         
         try:
             restart_count += 1
-            logger.info(f"🚀 Starting simple stream server (attempt #{restart_count})")
+            logger.info(f"🚀 Starting RTSP stream server (attempt #{restart_count})")
             
             # Initialize camera with retry logic
             camera_retry_count = 0
@@ -478,7 +696,7 @@ def run_stream_server():
                 try:
                     camera_retry_count += 1
                     logger.debug(f"🔄 Camera initialization attempt {camera_retry_count}/{max_camera_retries}")
-                    picam2 = initialize_camera(config)
+                    picam2, encoder = initialize_camera(config)
                     logger.debug("✅ Camera initialization completed")
                     break
                 except Exception as camera_init_error:
@@ -489,16 +707,17 @@ def run_stream_server():
                     time.sleep(3)
             
             try:
-                # Initialize simple streaming output
-                output = StreamingOutput()
-                logger.info("🔧 Created simple streaming output")
+                # Initialize H.264 streaming output
+                output = H264StreamOutput()
+                logger.info("🔧 Created H.264 streaming output")
                 
                 # Initialize stream monitor
                 stream_monitor = StreamMonitor(output, request_restart, check_interval=5.0, max_frame_age=10.0)
                 
                 logger.info("📊 Configuration:")
                 logger.info(f"   - Camera resolution: {config.camera.resolution}")
-                logger.info(f"   - Server port: {config.server.port}")
+                logger.info(f"   - RTSP port: {config.server.port}")
+                logger.info(f"   - H.264 bitrate: 1Mbps (optimized for Pi 3B+)")
                 
             except Exception as output_error:
                 logger.error(f"❌ Failed to create streaming output: {output_error}", exc_info=True)
@@ -512,7 +731,7 @@ def run_stream_server():
                 try:
                     streaming_retry_count += 1
                     logger.debug(f"🔄 Camera streaming attempt {streaming_retry_count}/{max_streaming_retries}")
-                    if not start_camera_streaming(picam2, output):
+                    if not start_camera_streaming(picam2, encoder, output):
                         raise CameraError("Failed to start streaming")
                     logger.debug("✅ Camera streaming started successfully")
                     break
@@ -523,23 +742,23 @@ def run_stream_server():
                     logger.info(f"⏳ Retrying camera streaming in 2 seconds...")
                     time.sleep(2)
                 
-            # Start HTTP server
+            # Start RTSP server
             try:
-                address = (config.server.host, config.server.port)
-                logger.debug(f"🌐 Creating server on {address}")
-                server_instance = StreamingServer(address, StreamingHandler)
+                logger.debug(f"📡 Creating RTSP server on {config.server.host}:{config.server.port}")
+                server_instance = RTSPServer(config.server.host, config.server.port, output)
                 
-                logger.info(f"🌐 Simple stream server started on http://localhost:{config.server.port}/stream.mjpg")
-                logger.info("📹 Direct MJPEG stream available")
+                logger.info(f"📡 RTSP stream server started on rtsp://localhost:{config.server.port}/stream")
+                logger.info("📹 Hardware H.264 stream available for VLC, FFmpeg, etc.")
+                logger.info("🎯 Optimized for Pi 3B+ with up to 4 concurrent clients")
                 
                 # Start stream monitoring
                 stream_monitor.start_monitoring()
                 
                 try:
-                    logger.debug("🔄 Starting server loop...")
+                    logger.debug("🔄 Starting RTSP server...")
                     
                     # Run server in a separate thread so we can monitor for restart requests
-                    server_thread = threading.Thread(target=server_instance.serve_forever, daemon=True)
+                    server_thread = threading.Thread(target=server_instance.start, daemon=True)
                     server_thread.start()
                     
                     # Wait for either the server to stop or a restart request
@@ -557,20 +776,20 @@ def run_stream_server():
                     # Don't raise here - let the outer exception handler restart everything
                     
                 finally:
-                    logger.info("🛑 Shutting down server...")
+                    logger.info("🛑 Shutting down RTSP server...")
                     try:
                         if server_instance:
-                            server_instance.shutdown()
-                            logger.debug("✅ Server shutdown completed")
+                            server_instance.stop()
+                            logger.debug("✅ RTSP server shutdown completed")
                     except Exception as shutdown_error:
-                        logger.error(f"❌ Server shutdown error: {shutdown_error}", exc_info=True)
+                        logger.error(f"❌ RTSP server shutdown error: {shutdown_error}", exc_info=True)
                         
             except Exception as server_error:
-                logger.error(f"❌ HTTP server creation/start failed: {server_error}", exc_info=True)
-                raise CameraError(f"HTTP server failed: {server_error}")
+                logger.error(f"❌ RTSP server creation/start failed: {server_error}", exc_info=True)
+                raise CameraError(f"RTSP server failed: {server_error}")
                     
         except KeyboardInterrupt:
-            logger.info("� Received shutdown signal")
+            logger.info("🛑 Received shutdown signal")
             break
         except CameraError as camera_error:
             logger.error(f"🔄 Camera error - restarting: {camera_error}", exc_info=True)
@@ -604,7 +823,7 @@ def run_stream_server():
             if picam2:
                 try:
                     logger.debug("🔄 Stopping camera...")
-                    picam2.stop()
+                    stop_camera_streaming(picam2)
                     picam2.close()
                     logger.info("📹 Camera closed")
                 except Exception as camera_close_error:
@@ -612,16 +831,16 @@ def run_stream_server():
                     
             if server_instance:
                 try:
-                    server_instance.server_close()
-                    logger.debug("🌐 Server socket closed")
+                    server_instance.stop()
+                    logger.debug("📡 RTSP server closed")
                 except Exception as socket_close_error:
-                    logger.error(f"❌ Error closing server socket: {socket_close_error}", exc_info=True)
+                    logger.error(f"❌ Error closing RTSP server: {socket_close_error}", exc_info=True)
 
 
 def main():
     """Main entry point."""
     try:
-        logger.info("🎬 Simple MJPEG Stream Server Starting...")
+        logger.info("🎬 RTSP Stream Server Starting...")
         run_stream_server()
     except Exception as e:
         logger.critical(f"💥 Fatal error: {e}", exc_info=True)
@@ -629,7 +848,7 @@ def main():
     except KeyboardInterrupt:
         logger.info("👋 Interrupted by user")
     finally:
-        logger.info("👋 Simple Stream Server stopped")
+        logger.info("👋 RTSP Stream Server stopped")
 
 
 if __name__ == "__main__":

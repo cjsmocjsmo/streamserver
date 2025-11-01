@@ -1,20 +1,20 @@
-"""Configuration management for the simple stream server."""
+"""Configuration management for the RTSP stream server."""
 
 from dataclasses import dataclass
 
 
 @dataclass
 class CameraConfig:
-    """Camera configuration."""
-    resolution = (640, 480)
-    format = "RGB888"
+    """Camera configuration optimized for Pi 3B+ with H.264."""
+    resolution = (1280, 720)  # 720p - good balance for Pi 3B+
+    format = "YUV420"  # Required for H.264 encoding
 
 
 @dataclass
 class ServerConfig:
-    """HTTP server configuration."""
-    host = ""
-    port = 8000
+    """RTSP server configuration."""
+    host = ""  # Bind to all interfaces
+    port = 554  # Standard RTSP port (use 8554 if running as non-root)
 
 
 @dataclass

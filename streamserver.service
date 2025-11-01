@@ -1,5 +1,5 @@
 [Unit]
-Description=Raspberry Pi MJPEG Stream Server
+Description=Raspberry Pi RTSP Stream Server with H.264 Hardware Encoding
 After=network.target
 Wants=network.target
 
@@ -21,11 +21,14 @@ Environment=PYTHONUNBUFFERED=1
 NoNewPrivileges=yes
 PrivateTmp=yes
 
-# Resource limits
-LimitNOFILE=1024
+# Resource limits (increased for H.264 encoding)
+LimitNOFILE=2048
 
-# Camera access permissions
+# Camera and video access permissions
 SupplementaryGroups=video
+
+# Note: If using standard RTSP port 554, consider running with CAP_NET_BIND_SERVICE
+# or change port to 8554 in config.py for non-root operation
 
 [Install]
 WantedBy=multi-user.target

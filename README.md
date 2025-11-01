@@ -1,147 +1,162 @@
-# Simple MJPEG Stream Server
+# RTSP Stream Server
 
-A minimal, high-performance video streaming server for Raspberry Pi camera with automatic error recovery.
+A hardware-accelerated RTSP streaming server for Raspberry Pi camera using Picamera2 with H.264 hardware encoding. Optimized for Raspberry Pi 3B+ with support for 2-4 concurrent clients.
 
-## 🌟 Features
+## Features
 
-- **Real-time MJPEG Streaming**: High-performance video streaming via HTTP
-- **Minimal Dependencies**: Only Picamera2 and OpenCV for JPEG encoding
-- **Automatic Error Recovery**: Camera restart on any errors with comprehensive logging
-- **Multi-threaded Architecture**: Optimized for smooth streaming performance
-- **Comprehensive Logging**: Detailed error logging with separate error files
-- **Service Integration**: Systemd service files for automatic startup
+- **Hardware H.264 Encoding**: Uses Raspberry Pi's GPU for efficient video encoding
+- **RTSP Protocol**: Standard streaming protocol compatible with VLC, FFmpeg, and other media players
+- **Low Bandwidth**: 10-20x more efficient than MJPEG streaming
+- **Multiple Clients**: Supports up to 4 concurrent clients on Pi 3B+
+- **Stream Monitoring**: Automatic health checks and restart on failures
+- **Optimized for Pi 3B+**: Configured for best performance on older hardware
 
-## 🚀 Quick Start
+## Hardware Requirements
 
-### Prerequisites
-- Raspberry Pi with camera module
-- Raspberry Pi OS (recommended)
+- Raspberry Pi 3B+ or newer
+- Pi Camera (v1, v2, or HQ camera)
+- Sufficient power supply (recommended 2.5A+)
 
-### Installation
+## Configuration
 
+The server is configured in `config.py`:
+
+- **Resolution**: 1280x720 (720p) - optimized for Pi 3B+
+- **Bitrate**: 1Mbps - good balance of quality and bandwidth
+- **Port**: 554 (standard RTSP port, use 8554 for non-root)
+- **Format**: YUV420 (required for H.264)
+
+## Usage
+
+### Direct Execution
 ```bash
-# Install system dependencies
-sudo apt update
-sudo apt install python3-opencv python3-picamera2
-
-# Clone and run
-git clone <your-repo>
-cd streamserver
 python3 streamserver.py
 ```
 
-### Access the Stream
-
-Open http://localhost:8000/stream.mjpg in your browser or media player
-
-## 📁 Project Structure
-
-```
-streamserver/
-├── streamserver.py         # Main streaming server
-├── config.py              # Camera and server configuration
-├── dependencies.py        # Dependency verification
-├── exceptions.py          # Custom exception classes  
-├── logger.py             # Comprehensive logging system
-├── streamserver.service   # Systemd service file
-├── install-service.sh     # Service installer script
-├── uninstall-service.sh   # Service uninstaller script
-└── README.md             # This file
-```
-
-## ⚙️ Configuration
-
-The server uses minimal configuration with sensible defaults:
-
-### Camera Settings
-- **Resolution**: 640x480 (configurable in config.py)
-- **Format**: RGB888 for compatibility
-- **FPS**: 30 fps for smooth streaming
-
-### Server Settings  
-- **Host**: All interfaces (0.0.0.0)
-- **Port**: 8000 (configurable in config.py)
-
-## 🔄 Error Recovery
-
-The server includes comprehensive error recovery:
-
-- **Camera Restart**: Automatic camera restart on any hardware errors
-- **Retry Logic**: Multiple retry attempts for camera initialization and streaming
-- **Error Logging**: Detailed error logs with full stack traces
-- **Graceful Degradation**: Clean shutdown after maximum restart attempts
-
-## 🗂️ Logging
-
-Comprehensive logging system:
-- **Main Log**: All operations and debug information
-- **Error Log**: Dedicated error file for troubleshooting
-- **Console Output**: Real-time status and important messages
-- **Exception Capture**: Automatic capture of uncaught exceptions
-
-Log files are created in the `logs/` directory with timestamps.
-
-## 🔧 Installation as Service
-
-Install as a systemd service for automatic startup:
-
+### As System Service
 ```bash
 # Install service
-./install-service.sh
-
-# Control service
+sudo cp streamserver.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable streamserver
 sudo systemctl start streamserver
-sudo systemctl stop streamserver  
+
+# Check status
 sudo systemctl status streamserver
 
 # View logs
 sudo journalctl -u streamserver -f
 ```
 
-## 📊 Performance
+### Accessing the Stream
 
-Optimized for minimal resource usage:
-- **Low CPU**: Efficient JPEG encoding and streaming
-- **Low Memory**: Minimal buffering with circular frame buffer
-- **Automatic Recovery**: Restart on errors to maintain uptime
-- **Thread Safety**: Proper synchronization for multi-threaded operation
+The RTSP stream is available at:
+```
+rtsp://[PI_IP_ADDRESS]:554/stream
+```
 
-## 🔒 Security Considerations
+**VLC Media Player:**
+1. Open VLC
+2. Go to Media → Open Network Stream
+3. Enter: `rtsp://192.168.1.100:554/stream` (replace with your Pi's IP)
+4. Click Play
 
-- **Network Access**: Server binds to all interfaces by default
-- **Camera Permissions**: Ensure user is in 'video' group
-- **Resource Limits**: Monitor system resources during operation
+**FFmpeg (for recording or re-streaming):**
+```bash
+# View stream
+ffplay rtsp://192.168.1.100:554/stream
 
-## 🐛 Troubleshooting
+# Record to file
+ffmpeg -i rtsp://192.168.1.100:554/stream -c copy output.mp4
 
-### Common Issues:
+# Re-stream to YouTube Live
+ffmpeg -i rtsp://192.168.1.100:554/stream -c copy -f flv rtmp://a.rtmp.youtube.com/live2/YOUR_STREAM_KEY
+```
 
-1. **Camera not found**
-   ```
-   Solution: Check camera connection and enable camera interface
-   ```
+**OBS Studio:**
+1. Add Source → Media Source
+2. Input: `rtsp://192.168.1.100:554/stream`
+3. Uncheck "Local File"
 
-2. **Permission denied**
-   ```
-   Solution: Add user to video group: sudo usermod -a -G video $USER
-   ```
+## Performance Optimization
 
-3. **Import errors**
-   ```
-   Solution: Install packages: sudo apt install python3-opencv python3-picamera2
-   ```
+### For Pi 3B+:
+- Resolution: 720p@15-20fps or 1080p@10-15fps max
+- Bitrate: 500kbps-2Mbps range
+- Concurrent clients: 2-4 maximum
 
-4. **Stream not accessible**
-   ```
-   Solution: Check firewall and network configuration
-   ```
+### Port Configuration:
+- **Port 554**: Standard RTSP port (requires root or capabilities)
+- **Port 8554**: Alternative for non-root operation
 
-## 📄 License
+To use port 8554, update `config.py`:
+```python
+@dataclass
+class ServerConfig:
+    host = ""
+    port = 8554  # Non-root port
+```
 
-MIT License - see LICENSE file for details.
+## Troubleshooting
 
-## 🙏 Acknowledgments
+### Connection Issues:
+1. Check firewall: `sudo ufw allow 554` or `sudo ufw allow 8554`
+2. Verify Pi's IP address: `ip addr show`
+3. Test locally: `python3 test_rtsp.py`
 
-- Raspberry Pi Foundation for excellent camera integration
-- OpenCV community for image processing tools
-- Python community for the robust ecosystem
+### Performance Issues:
+1. Reduce resolution in `config.py`
+2. Lower bitrate in camera initialization
+3. Limit concurrent clients
+4. Check CPU usage: `htop`
+
+### Camera Issues:
+1. Enable camera: `sudo raspi-config` → Interface Options → Camera
+2. Check camera connection: `libcamera-hello --timeout 5000`
+3. Verify permissions: user must be in `video` group
+
+### Stream Quality:
+- **Pixelated**: Increase bitrate (but watch bandwidth)
+- **Laggy**: Reduce resolution or framerate
+- **Stuttering**: Check network stability
+
+## Logs and Monitoring
+
+Logs are written to:
+- `/tmp/streamserver.log` - General application logs
+- `/tmp/streamserver_errors.log` - Error-specific logs
+
+View real-time logs:
+```bash
+tail -f /tmp/streamserver.log
+```
+
+## Technical Details
+
+### H.264 Encoding:
+- Uses VideoCore IV hardware encoder
+- NAL unit parsing for proper RTP packetization
+- SPS/PPS parameter sets for decoder initialization
+
+### RTSP Implementation:
+- Standards-compliant RTSP 1.0 protocol
+- RTP/UDP transport for media data
+- Session management for multiple clients
+
+### Bandwidth Usage:
+- **MJPEG (old)**: ~5-15 Mbps for 720p
+- **H.264 (new)**: ~1-2 Mbps for 720p
+- **Savings**: 80-90% bandwidth reduction
+
+## Comparison with Previous MJPEG Version
+
+| Feature | MJPEG (Old) | H.264 RTSP (New) |
+|---------|-------------|------------------|
+| Bandwidth | 5-15 Mbps | 1-2 Mbps |
+| CPU Usage | Medium | Low (GPU encoding) |
+| Compatibility | Web browsers | Media players |
+| Latency | Low | Very low |
+| Quality | Good | Excellent |
+| Clients | 2-3 max | 4+ supported |
+
+The new RTSP implementation is significantly more efficient and suitable for the Pi 3B+ hardware limitations.

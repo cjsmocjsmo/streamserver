@@ -143,19 +143,25 @@ class H264StreamOutput(io.BufferedIOBase):
                 self._handle_nal_unit(nal_unit)
 
     def _handle_nal_unit(self, nal_unit):
-        """Handle a complete NAL unit."""
-        if not nal_unit:
+        """Process a single NAL unit and send to clients."""
+        if len(nal_unit) == 0:
             return
             
+        # Validate NAL unit type
         nal_type = nal_unit[0] & 0x1f
         
+        # Check for valid H.264 NAL unit types (0-23 are standard, 24-29 are aggregation/fragmentation)
+        if nal_type > 29:
+            logger.warning(f"Invalid NAL unit type {nal_type}, dropping packet")
+            return
+            
         # Log NAL types for debugging (only occasionally to avoid spam)
         if self.frame_count % 100 == 0:
             nal_names = {
                 1: "Non-IDR", 5: "IDR", 6: "SEI", 7: "SPS", 8: "PPS", 
                 9: "AUD", 12: "Filler"
             }
-            nal_name = nal_names.get(nal_type, f"Unknown({nal_type})")
+            nal_name = nal_names.get(nal_type, f"Type{nal_type}")
             logger.debug(f"📦 NAL unit: {nal_name} (type {nal_type}), size: {len(nal_unit)}")
         
         # Store SPS and PPS for new clients
@@ -333,6 +339,12 @@ class RTSPSession:
             if len(nal_unit) == 0:
                 return
                 
+            # Validate NAL unit type
+            nal_type = nal_unit[0] & 0x1f
+            if nal_type > 29:  # Valid H.264 NAL types are 0-29
+                logger.warning(f"Invalid NAL unit type: {nal_type}")
+                return
+                
             # RTP payload size limit (MTU 1500 - IP(20) - UDP(8) - RTP(12) = 1460)
             max_payload_size = 1400
             
@@ -348,7 +360,27 @@ class RTSPSession:
             raise
 
     def _send_rtp_packet(self, payload, marker=False):
-        """Send a single RTP packet."""
+        """Send a single RTP packet with proper H.264 formatting."""
+        # Validate payload
+        if not payload or len(payload) == 0:
+            logger.warning("Empty RTP payload, skipping")
+            return
+            
+        # For H.264, check if this is a valid NAL unit or FU-A fragment
+        if len(payload) > 0:
+            first_byte = payload[0]
+            
+            # Check if it's a FU-A fragment (type 28)
+            if (first_byte & 0x1f) == 28:
+                # FU-A packet - valid
+                pass
+            else:
+                # Single NAL unit - validate type
+                nal_type = first_byte & 0x1f
+                if nal_type > 29:
+                    logger.warning(f"Invalid NAL type in RTP payload: {nal_type}")
+                    return
+        
         # RTP Header (12 bytes)
         version = 2
         padding = 0
@@ -370,15 +402,27 @@ class RTSPSession:
         self.sequence_number = (self.sequence_number + 1) % 65536
 
     def _send_fragmented_nal(self, nal_unit):
-        """Fragment large NAL unit using FU-A."""
+        """Fragment large NAL unit using FU-A with proper validation."""
+        if len(nal_unit) == 0:
+            return
+            
         nal_type = nal_unit[0] & 0x1f
         nal_nri = nal_unit[0] & 0x60
         
-        # FU-A indicator byte
-        fu_indicator = 0x1c | nal_nri  # Type 28 (FU-A)
+        # Validate NAL type before fragmentation
+        if nal_type > 29:
+            logger.warning(f"Cannot fragment invalid NAL type: {nal_type}")
+            return
+        
+        # FU-A indicator byte (type 28)
+        fu_indicator = 0x1c | nal_nri  # Type 28 (FU-A) with original NRI bits
         
         max_fragment_size = 1398  # Account for FU headers
         nal_payload = nal_unit[1:]  # Skip original NAL header
+        
+        if len(nal_payload) == 0:
+            logger.warning("NAL unit has no payload to fragment")
+            return
         
         fragments = []
         offset = 0
@@ -387,13 +431,17 @@ class RTSPSession:
             fragments.append(nal_payload[offset:offset + fragment_size])
             offset += fragment_size
         
+        if len(fragments) == 0:
+            logger.warning("No fragments created from NAL unit")
+            return
+        
         for i, fragment in enumerate(fragments):
             # FU-A header byte
             start_bit = 1 if i == 0 else 0
             end_bit = 1 if i == len(fragments) - 1 else 0
             fu_header = (start_bit << 7) | (end_bit << 6) | nal_type
             
-            # Complete FU-A payload
+            # Complete FU-A payload: FU indicator + FU header + fragment data
             fu_payload = bytes([fu_indicator, fu_header]) + fragment
             
             # Send packet (marker bit set only on last fragment)
@@ -496,7 +544,7 @@ class RTSPHandler:
         except:
             local_ip = "0.0.0.0"
             
-        # Generate SDP (Session Description Protocol) optimized for VLC
+        # Generate SDP with consistent payload type 96 for H.264
         sdp = (
             "v=0\r\n"
             f"o=StreamServer 123456 654321 IN IP4 {local_ip}\r\n"
@@ -504,13 +552,11 @@ class RTSPHandler:
             f"c=IN IP4 {local_ip}\r\n"
             "t=0 0\r\n"
             "a=tool:StreamServer\r\n"
-            "a=type:broadcast\r\n"
             "m=video 0 RTP/AVP 96\r\n"
             "b=AS:1000\r\n"
             "a=rtpmap:96 H264/90000\r\n"
-            "a=fmtp:96 profile-level-id=42e01e; packetization-mode=1; sprop-parameter-sets=Z0LAHtkDxWhAAAADAEAAAAwDxYuS,aMuMsg==\r\n"
+            "a=fmtp:96 profile-level-id=42001e; packetization-mode=1\r\n"
             "a=control:track1\r\n"
-            "a=framerate:30\r\n"
             "a=sendonly\r\n"
         )
         

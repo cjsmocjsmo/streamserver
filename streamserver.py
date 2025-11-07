@@ -392,6 +392,13 @@ def main():
     logger.info("🚀 Starting RTSP Stream Server main()")
     picam2, encoder, fifo_path = initialize_camera(config)
     logger.info("🔧 Camera and encoder initialized. Starting streaming pipeline...")
+    # Open FIFO for reading in background to prevent deadlock
+    def keep_fifo_open_for_read(path):
+        with open(path, 'rb', buffering=0):
+            while True:
+                time.sleep(1)
+    fifo_reader_thread = threading.Thread(target=keep_fifo_open_for_read, args=(fifo_path,), daemon=True)
+    fifo_reader_thread.start()
     # Pass both output and fifo_path to streaming logic
     output = (None, fifo_path)
     logger.info("🟢 Starting camera streaming (motion detection, event handling, SCP, MQTT)...")

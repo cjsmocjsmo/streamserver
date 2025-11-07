@@ -246,12 +246,118 @@ def start_camera_streaming(picam2, encoder, output):
         logger.error(f"❌ Failed to start camera streaming: {e}", exc_info=True)
         return False
 
+class H264StreamOutput:
+    """A thread-safe buffer for H.264 NAL units to be sent to RTSP clients."""
+    def __init__(self):
+        self.clients = []
+        self.lock = threading.Lock()
+        self.condition = threading.Condition(self.lock)
+        self.buffer = bytearray()
+
+    def write(self, data):
+        with self.lock:
+            self.buffer.extend(data)
+            self.condition.notify_all()
+
+    def add_client(self, client):
+        with self.lock:
+            self.clients.append(client)
+
+    def remove_client(self, client):
+        with self.lock:
+            if client in self.clients:
+                self.clients.remove(client)
+
+    def get_data(self):
+        with self.lock:
+            if self.buffer:
+                data = bytes(self.buffer)
+                self.buffer.clear()
+                return data
+            return None
+
+import socketserver
+
+class RTSPRequestHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        self.server.output.add_client(self.request)
+        try:
+            while True:
+                data = self.server.output.get_data()
+                if data:
+                    try:
+                        self.request.sendall(data)
+                    except Exception:
+                        break
+                else:
+                    time.sleep(0.01)
+        finally:
+            self.server.output.remove_client(self.request)
+
+class RTSPServer(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    def __init__(self, server_address, RequestHandlerClass, output):
+        super().__init__(server_address, RequestHandlerClass)
+        self.output = output
+
+
+def start_rtsp_server(output, port=8554):
+    logger.info(f"🟢 RTSP server starting on port {port}...")
+    server = RTSPServer(("", port), RTSPRequestHandler, output)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    logger.info(f"🟢 RTSP server is running on rtsp://<your-ip>:{port}/")
+    return server
+
+
+# --- GStreamer RTSP Server Integration ---
+def start_gst_rtsp_server():
+    import gi
+    gi.require_version('Gst', '1.0')
+    gi.require_version('GstRtspServer', '1.0')
+    from gi.repository import Gst, GstRtspServer, GObject
+
+    Gst.init(None)
+
+    class RTSPMediaFactory(GstRtspServer.RTSPMediaFactory):
+        def __init__(self):
+            super(RTSPMediaFactory, self).__init__()
+            # Use the Pi camera as H.264 source
+            self.set_launch(
+                '( v4l2src ! video/x-h264,width=1280,height=720,framerate=30/1 ! h264parse ! rtph264pay name=pay0 pt=96 )'
+            )
+
+    server = GstRtspServer.RTSPServer()
+    factory = RTSPMediaFactory()
+    factory.set_shared(True)
+    mounts = server.get_mount_points()
+    mounts.add_factory("/stream", factory)
+    server.attach(None)
+    logger.info("🟢 GStreamer RTSP server running at rtsp://<your-ip>:8554/stream")
+    # Run in a background thread
+    def run_loop():
+        loop = GObject.MainLoop()
+        loop.run()
+    t = threading.Thread(target=run_loop, daemon=True)
+    t.start()
+    return t
+
+
 # --- Main Entry Point ---
 def main():
     config = AppConfig()
+    logger.info("🚀 Starting RTSP Stream Server main()")
     picam2, encoder = initialize_camera(config)
-    output = None  # Replace with actual H264StreamOutput instance if needed
-    start_camera_streaming(picam2, encoder, output)
+    logger.info("🔧 Camera and encoder initialized. Starting streaming pipeline...")
+    output = None  # Not used for GStreamer RTSP
+    logger.info("🟢 Starting camera streaming (motion detection, event handling, SCP, MQTT)...")
+    started = start_camera_streaming(picam2, encoder, output)
+    if started:
+        logger.info("✅ Camera streaming pipeline is running.")
+    else:
+        logger.error("❌ Camera streaming pipeline failed to start.")
+    # Start GStreamer RTSP server
+    gst_thread = start_gst_rtsp_server()
     try:
         while True:
             time.sleep(1)

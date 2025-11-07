@@ -247,25 +247,34 @@ def start_camera_streaming(picam2, encoder, output):
     try:
         # Write H264 to both event logic and RTSP FIFO if needed
         if fifo_path:
-            class TeeOutput:
-                def __init__(self, file_path, fifo_path):
+            class FifoOutput:
+                def __init__(self, fifo_path):
                     self.fifo = open(fifo_path, 'wb', buffering=0)
-                    self.file_output = None
-                    if file_path is not None:
-                        self.file_output = FileOutput(file_path)
                 def write(self, data):
-                    if self.file_output:
-                        self.file_output.write(data)
                     try:
                         self.fifo.write(data)
                     except BrokenPipeError:
                         pass
                 def close(self):
+                    self.fifo.close()
+
+            class TeeOutput:
+                def __init__(self, file_path, fifo_path):
+                    self.file_output = FileOutput(file_path) if file_path else None
+                    self.fifo_output = FifoOutput(fifo_path)
+                def write(self, data):
+                    if self.file_output:
+                        self.file_output.write(data)
+                    self.fifo_output.write(data)
+                def close(self):
                     if self.file_output:
                         self.file_output.close()
-                    self.fifo.close()
-            # Only pass file_path if not None
-            file_output = TeeOutput(output if output else None, fifo_path)
+                    self.fifo_output.close()
+
+            if output:
+                file_output = TeeOutput(output, fifo_path)
+            else:
+                file_output = FifoOutput(fifo_path)
         else:
             file_output = FileOutput(output)
         picam2.start_recording(encoder, file_output)
@@ -403,7 +412,7 @@ def main():
                 time.sleep(1)
     fifo_reader_thread = threading.Thread(target=keep_fifo_open_for_read, args=(fifo_path,), daemon=True)
     fifo_reader_thread.start()
-    # Pass both output and fifo_path to streaming logic
+    # Pass both output and fifo_path to streaming logic (output=None means only RTSP streaming)
     output = (None, fifo_path)
     logger.info("🟢 Starting camera streaming (motion detection, event handling, SCP, MQTT)...")
     started = start_camera_streaming(picam2, encoder, output)

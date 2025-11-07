@@ -98,7 +98,13 @@ def initialize_camera(config):
             iperiod=30
         )
         logger.info(f"✅ Camera initialized: {config.camera.resolution} with H.264 hardware encoding")
-        return picam2, encoder
+        # Create named pipe for RTSP streaming
+        fifo_path = "/tmp/picamera2_stream_fifo.h264"
+        if os.path.exists(fifo_path):
+            os.remove(fifo_path)
+        os.mkfifo(fifo_path)
+        logger.info(f"🛠️ Created named pipe for RTSP streaming: {fifo_path}")
+        return picam2, encoder, fifo_path
     except Exception as e:
         logger.error(f"❌ Camera initialization failed: {e}", exc_info=True)
         raise CameraError(f"Failed to initialize camera: {e}")
@@ -117,6 +123,11 @@ def start_camera_streaming(picam2, encoder, output):
     post_event_frames = {'count': 0}
     exclude_regions = [(0, 0, 200, 200)]
     motion_detector = MotionDetector(exclude_regions=exclude_regions, min_area=8000)
+
+    # If output is a tuple (fifo_path, for RTSP), split it
+    fifo_path = None
+    if isinstance(output, tuple):
+        output, fifo_path = output
 
     def get_ip():
         try:
@@ -234,7 +245,25 @@ def start_camera_streaming(picam2, encoder, output):
             time.sleep(60)
 
     try:
-        file_output = FileOutput(output)
+        # Write H264 to both event logic and RTSP FIFO if needed
+        if fifo_path:
+            # Write to both event file and FIFO for RTSP
+            class TeeOutput:
+                def __init__(self, file_path, fifo_path):
+                    self.file_output = FileOutput(file_path)
+                    self.fifo = open(fifo_path, 'wb', buffering=0)
+                def write(self, data):
+                    self.file_output.write(data)
+                    try:
+                        self.fifo.write(data)
+                    except BrokenPipeError:
+                        pass
+                def close(self):
+                    self.file_output.close()
+                    self.fifo.close()
+            file_output = TeeOutput(output, fifo_path)
+        else:
+            file_output = FileOutput(output)
         picam2.start_recording(encoder, file_output)
         t = threading.Thread(target=opencv_motion_loop, daemon=True)
         t.start()
@@ -330,14 +359,13 @@ def start_gst_rtsp_server():
         except Exception:
             return "localhost"
 
+    fifo_path = "/tmp/picamera2_stream_fifo.h264"
     class RTSPMediaFactory(GstRtspServer.RTSPMediaFactory):
         def __init__(self):
             super().__init__()
-            # Robust pipeline: try v4l2src, fallback to testsrc if camera busy
-            # Use config or autodetect width/height if possible
+            # Use the named pipe as the source for RTSP
             pipeline = (
-                'v4l2src device=/dev/video0 ! video/x-h264,width=1280,height=720,framerate=30/1 '
-                '! h264parse ! rtph264pay name=pay0 pt=96'
+                f'filesrc location={fifo_path} do-timestamp=true ! h264parse ! rtph264pay name=pay0 pt=96'
             )
             self.set_launch(pipeline)
 
@@ -362,9 +390,10 @@ def start_gst_rtsp_server():
 def main():
     config = AppConfig()
     logger.info("🚀 Starting RTSP Stream Server main()")
-    picam2, encoder = initialize_camera(config)
+    picam2, encoder, fifo_path = initialize_camera(config)
     logger.info("🔧 Camera and encoder initialized. Starting streaming pipeline...")
-    output = None  # Not used for GStreamer RTSP
+    # Pass both output and fifo_path to streaming logic
+    output = (None, fifo_path)
     logger.info("🟢 Starting camera streaming (motion detection, event handling, SCP, MQTT)...")
     started = start_camera_streaming(picam2, encoder, output)
     if started:

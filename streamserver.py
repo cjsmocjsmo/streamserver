@@ -247,8 +247,10 @@ def start_camera_streaming(picam2, encoder, output):
     try:
         # Write H264 to both event logic and RTSP FIFO if needed
         if fifo_path:
-            class FifoOutput:
+            from picamera2.outputs import Output
+            class FifoOutput(Output):
                 def __init__(self, fifo_path):
+                    super().__init__()
                     self.fifo = open(fifo_path, 'wb', buffering=0)
                 def write(self, data):
                     try:
@@ -260,8 +262,9 @@ def start_camera_streaming(picam2, encoder, output):
                 def close(self):
                     self.fifo.close()
 
-            class TeeOutput:
+            class TeeOutput(Output):
                 def __init__(self, file_path, fifo_path):
+                    super().__init__()
                     self.file_output = FileOutput(file_path) if file_path else None
                     self.fifo_output = FifoOutput(fifo_path)
                 def write(self, data):

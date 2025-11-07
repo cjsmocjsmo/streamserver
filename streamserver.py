@@ -124,7 +124,7 @@ def start_camera_streaming(picam2, encoder, output):
     exclude_regions = [(0, 0, 200, 200)]
     motion_detector = MotionDetector(exclude_regions=exclude_regions, min_area=8000)
 
-    # If output is a tuple (fifo_path, for RTSP), split it
+    # If output is a tuple (file_path, fifo_path), split it
     fifo_path = None
     if isinstance(output, tuple):
         output, fifo_path = output
@@ -247,21 +247,25 @@ def start_camera_streaming(picam2, encoder, output):
     try:
         # Write H264 to both event logic and RTSP FIFO if needed
         if fifo_path:
-            # Write to both event file and FIFO for RTSP
             class TeeOutput:
                 def __init__(self, file_path, fifo_path):
-                    self.file_output = FileOutput(file_path)
                     self.fifo = open(fifo_path, 'wb', buffering=0)
+                    self.file_output = None
+                    if file_path is not None:
+                        self.file_output = FileOutput(file_path)
                 def write(self, data):
-                    self.file_output.write(data)
+                    if self.file_output:
+                        self.file_output.write(data)
                     try:
                         self.fifo.write(data)
                     except BrokenPipeError:
                         pass
                 def close(self):
-                    self.file_output.close()
+                    if self.file_output:
+                        self.file_output.close()
                     self.fifo.close()
-            file_output = TeeOutput(output, fifo_path)
+            # Only pass file_path if not None
+            file_output = TeeOutput(output if output else None, fifo_path)
         else:
             file_output = FileOutput(output)
         picam2.start_recording(encoder, file_output)

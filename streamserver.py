@@ -252,6 +252,20 @@ def main():
     picam2, encoder = initialize_camera(config)
     output = None  # Replace with actual H264StreamOutput instance if needed
     start_camera_streaming(picam2, encoder, output)
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logger.info("👋 Server interrupted by user, shutting down.")
+        try:
+            picam2.stop_recording()
+        except Exception:
+            pass
+        try:
+            picam2.close()
+        except Exception:
+            pass
+        logger.info("📷 Camera closed. Goodbye!")
 
 if __name__ == "__main__":
     main()

@@ -255,6 +255,8 @@ def start_camera_streaming(picam2, encoder, output):
                         self.fifo.write(data)
                     except BrokenPipeError:
                         pass
+                def flush(self):
+                    pass
                 def close(self):
                     self.fifo.close()
 
@@ -266,6 +268,10 @@ def start_camera_streaming(picam2, encoder, output):
                     if self.file_output:
                         self.file_output.write(data)
                     self.fifo_output.write(data)
+                def flush(self):
+                    if self.file_output:
+                        self.file_output.flush()
+                    self.fifo_output.flush()
                 def close(self):
                     if self.file_output:
                         self.file_output.close()

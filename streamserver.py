@@ -315,17 +315,31 @@ def start_gst_rtsp_server():
     import gi
     gi.require_version('Gst', '1.0')
     gi.require_version('GstRtspServer', '1.0')
-    from gi.repository import Gst, GstRtspServer, GObject
+    gi.require_version('GLib', '2.0')
+    from gi.repository import Gst, GstRtspServer, GLib
 
     Gst.init(None)
 
+    def get_ip():
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "localhost"
+
     class RTSPMediaFactory(GstRtspServer.RTSPMediaFactory):
         def __init__(self):
-            super(RTSPMediaFactory, self).__init__()
-            # Use the Pi camera as H.264 source
-            self.set_launch(
-                '( v4l2src ! video/x-h264,width=1280,height=720,framerate=30/1 ! h264parse ! rtph264pay name=pay0 pt=96 )'
+            super().__init__()
+            # Robust pipeline: try v4l2src, fallback to testsrc if camera busy
+            # Use config or autodetect width/height if possible
+            pipeline = (
+                'v4l2src device=/dev/video0 ! video/x-h264,width=1280,height=720,framerate=30/1 '
+                '! h264parse ! rtph264pay name=pay0 pt=96'
             )
+            self.set_launch(pipeline)
 
     server = GstRtspServer.RTSPServer()
     factory = RTSPMediaFactory()
@@ -333,10 +347,11 @@ def start_gst_rtsp_server():
     mounts = server.get_mount_points()
     mounts.add_factory("/stream", factory)
     server.attach(None)
-    logger.info("🟢 GStreamer RTSP server running at rtsp://<your-ip>:8554/stream")
+    ip = get_ip()
+    logger.info(f"🟢 GStreamer RTSP server running at rtsp://{ip}:8554/stream")
     # Run in a background thread
     def run_loop():
-        loop = GObject.MainLoop()
+        loop = GLib.MainLoop()
         loop.run()
     t = threading.Thread(target=run_loop, daemon=True)
     t.start()

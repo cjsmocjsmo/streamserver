@@ -2,7 +2,7 @@
 """
 RTSP Stream Server (Reconstructed)
 A hardware-accelerated RTSP streaming server for Raspberry Pi camera.
-Includes OpenCV-based motion detection, region exclusion, event video saving, MQTT notification, and SCP upload.
+Includes OpenCV-based motion detection, region exclusion, event video saving, MQTT notification.
 """
 
 import io
@@ -17,7 +17,6 @@ import random
 import collections
 from datetime import datetime
 import glob
-import subprocess
 try:
     import paho.mqtt.publish as publish
 except ImportError:
@@ -89,7 +88,7 @@ def initialize_camera(config):
         logger.info("📷 Initializing Picamera2 with H.264 hardware encoding...")
         picam2 = Picamera2()
         video_config = picam2.create_video_configuration(
-            main={"size": config.camera.resolution, "format": "YUV420"}
+            main={"size": config.camera.resolution, "format": "H264"}
         )
         picam2.configure(video_config)
         encoder = H264Encoder(
@@ -206,43 +205,6 @@ def start_camera_streaming(picam2, encoder, output):
                 logger.error(f"OpenCV motion detection error: {e}")
                 time.sleep(1)
 
-    def scp_videos_when_idle():
-        if psutil is None:
-            logger.warning("psutil not installed, cannot monitor CPU usage for SCP uploads")
-            return
-        logger.info("🕒 SCP monitor thread started")
-        IDLE_CPU_THRESHOLD = 20.0
-        IDLE_PERIOD = 15 * 60
-        REMOTE = "teresa@10.0.4.40:/home/teresa/Videos"
-        checked_files = set()
-        idle_start = None
-        while True:
-            try:
-                cpu = psutil.cpu_percent(interval=10)
-                if cpu < IDLE_CPU_THRESHOLD:
-                    if idle_start is None:
-                        idle_start = time.time()
-                    elif time.time() - idle_start >= IDLE_PERIOD:
-                        files = sorted(glob.glob(os.path.join(VIDEO_DIR, f"{CAMERA_NAME}_*.mp4")))
-                        for f in files:
-                            if f in checked_files:
-                                continue
-                            logger.info(f"⬆️ SCP uploading {f} to {REMOTE}")
-                            try:
-                                result = subprocess.run(["scp", f, REMOTE], capture_output=True, timeout=120)
-                                if result.returncode == 0:
-                                    logger.info(f"✅ SCP upload succeeded: {f}")
-                                    checked_files.add(f)
-                                else:
-                                    logger.error(f"❌ SCP upload failed: {f}, {result.stderr.decode()}")
-                            except Exception as e:
-                                logger.error(f"SCP error: {e}")
-                        idle_start = None
-                else:
-                    idle_start = None
-            except Exception as e:
-                logger.error(f"SCP monitor error: {e}")
-            time.sleep(60)
 
     try:
         # Write H264 to both event logic and RTSP FIFO if needed
@@ -289,8 +251,7 @@ def start_camera_streaming(picam2, encoder, output):
         picam2.start_recording(encoder, file_output)
         t = threading.Thread(target=opencv_motion_loop, daemon=True)
         t.start()
-        scp_thread = threading.Thread(target=scp_videos_when_idle, daemon=True)
-        scp_thread.start()
+    # SCP thread removed
         logger.info("✅ Camera streaming started with motion detection and event handling")
         return True
     except Exception as e:
@@ -385,9 +346,9 @@ def start_gst_rtsp_server():
     class RTSPMediaFactory(GstRtspServer.RTSPMediaFactory):
         def __init__(self):
             super().__init__()
-            # Use the named pipe as the source for RTSP
+            # Use the named pipe as the source for RTSP, send SPS/PPS regularly for compatibility
             pipeline = (
-                f'filesrc location={fifo_path} do-timestamp=true ! h264parse ! rtph264pay name=pay0 pt=96'
+                f'filesrc location={fifo_path} do-timestamp=true ! h264parse config-interval=1 ! rtph264pay name=pay0 pt=96'
             )
             self.set_launch(pipeline)
 

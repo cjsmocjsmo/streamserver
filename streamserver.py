@@ -88,7 +88,7 @@ def initialize_camera(config):
         logger.info("📷 Initializing Picamera2 with H.264 hardware encoding...")
         picam2 = Picamera2()
         video_config = picam2.create_video_configuration(
-            main={"size": config.camera.resolution, "format": "H264"}
+            main={"size": config.camera.resolution, "format": "YUV420"}
         )
         picam2.configure(video_config)
         encoder = H264Encoder(

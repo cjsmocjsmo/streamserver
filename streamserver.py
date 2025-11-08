@@ -351,9 +351,9 @@ def start_gst_rtsp_server():
             )
             self.set_launch(pipeline)
 
-        def do_create_element(self, url):
-            logger.info(f"RTSPMediaFactory: Creating element for URL: {url}")
-            return super().do_create_element(url)
+        def do_create_element(self, url, media):
+            logger.info(f"RTSPMediaFactory: Creating element for URL: {url}, media: {media}")
+            return super().do_create_element(url, media)
 
     class CustomRTSPServer(GstRtspServer.RTSPServer):
         def __init__(self):

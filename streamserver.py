@@ -208,40 +208,40 @@ def start_camera_streaming(picam2, encoder, output):
 
     try:
         # Write H264 to both event logic and RTSP FIFO if needed
-        if fifo_path:
-            from picamera2.outputs import Output
-            class FifoOutput(Output):
-                def __init__(self, fifo_path):
-                    super().__init__()
-                    self.fifo = open(fifo_path, 'wb', buffering=0)
-                def write(self, data):
-                    try:
-                        self.fifo.write(data)
-                    except BrokenPipeError:
-                        pass
-                def flush(self):
+        from picamera2.outputs import Output
+        class FifoOutput(Output):
+            def __init__(self, fifo_path):
+                super().__init__()
+                self.fifo = open(fifo_path, 'wb', buffering=0)
+            def write(self, data):
+                try:
+                    self.fifo.write(data)
+                except BrokenPipeError:
                     pass
-                def close(self):
-                    self.fifo.close()
+            def flush(self):
+                pass
+            def close(self):
+                self.fifo.close()
 
-            class TeeOutput(Output):
-                def __init__(self, file_path, fifo_path):
-                    super().__init__()
-                    self.file_output = FileOutput(file_path) if file_path else None
-                    self.fifo_output = FifoOutput(fifo_path)
-                def write(self, data):
-                    if self.file_output:
-                        self.file_output.write(data)
-                    self.fifo_output.write(data)
-                def flush(self):
-                    if self.file_output:
-                        self.file_output.flush()
-                    self.fifo_output.flush()
-                def close(self):
-                    if self.file_output:
-                        self.file_output.close()
-                    self.fifo_output.close()
+        class TeeOutput(Output):
+            def __init__(self, file_path, fifo_path):
+                super().__init__()
+                self.file_output = FileOutput(file_path) if file_path else None
+                self.fifo_output = FifoOutput(fifo_path)
+            def write(self, data):
+                if self.file_output:
+                    self.file_output.write(data)
+                self.fifo_output.write(data)
+            def flush(self):
+                if self.file_output:
+                    self.file_output.flush()
+                self.fifo_output.flush()
+            def close(self):
+                if self.file_output:
+                    self.file_output.close()
+                self.fifo_output.close()
 
+        if fifo_path:
             if output:
                 file_output = TeeOutput(output, fifo_path)
             else:
@@ -251,7 +251,6 @@ def start_camera_streaming(picam2, encoder, output):
         picam2.start_recording(encoder, file_output)
         t = threading.Thread(target=opencv_motion_loop, daemon=True)
         t.start()
-    # SCP thread removed
         logger.info("✅ Camera streaming started with motion detection and event handling")
         return True
     except Exception as e:

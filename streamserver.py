@@ -351,6 +351,36 @@ def start_gst_rtsp_server():
             )
             self.set_launch(pipeline)
 
+        def do_create_element(self, url):
+            logger.info(f"RTSPMediaFactory: Creating element for URL: {url}")
+            return super().do_create_element(url)
+
+    class CustomRTSPServer(GstRtspServer.RTSPServer):
+        def __init__(self):
+            super().__init__()
+
+        def client_connected(self, client):
+            ip = client.get_connection().get_ip()
+            port = client.get_connection().get_port()
+            logger.info(f"RTSP client connected: {ip}:{port}")
+            return super().client_connected(client)
+
+    server = CustomRTSPServer()
+    factory = RTSPMediaFactory()
+    factory.set_shared(True)
+    mounts = server.get_mount_points()
+    mounts.add_factory("/stream", factory)
+    server.attach(None)
+    ip = get_ip()
+    logger.info(f"🟢 GStreamer RTSP server running at rtsp://{ip}:8554/stream")
+    # Run in a background thread
+    def run_loop():
+        loop = GLib.MainLoop()
+        loop.run()
+    t = threading.Thread(target=run_loop, daemon=True)
+    t.start()
+    return t
+
     server = GstRtspServer.RTSPServer()
     factory = RTSPMediaFactory()
     factory.set_shared(True)

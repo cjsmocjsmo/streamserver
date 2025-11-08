@@ -212,16 +212,20 @@ def start_camera_streaming(picam2, encoder, output):
         class FifoOutput(Output):
             def __init__(self, fifo_path):
                 super().__init__()
+                self.fifo_path = fifo_path
                 self.fifo = open(fifo_path, 'wb', buffering=0)
+                logger.info(f"FifoOutput: Opened FIFO for writing: {fifo_path}")
             def write(self, data):
                 try:
                     self.fifo.write(data)
+                    logger.debug(f"FifoOutput: Wrote {len(data)} bytes to FIFO {self.fifo_path}")
                 except BrokenPipeError:
-                    pass
+                    logger.error(f"FifoOutput: BrokenPipeError when writing to FIFO {self.fifo_path}")
             def flush(self):
                 pass
             def close(self):
                 self.fifo.close()
+                logger.info(f"FifoOutput: Closed FIFO {self.fifo_path}")
 
         class TeeOutput(Output):
             def __init__(self, file_path, fifo_path):
@@ -248,7 +252,9 @@ def start_camera_streaming(picam2, encoder, output):
                 file_output = FifoOutput(fifo_path)
         else:
             file_output = FileOutput(output)
+        logger.info("Starting Picamera2 recording with H.264 encoder and output...")
         picam2.start_recording(encoder, file_output)
+        logger.info("Picamera2 recording started.")
         t = threading.Thread(target=opencv_motion_loop, daemon=True)
         t.start()
         logger.info("✅ Camera streaming started with motion detection and event handling")

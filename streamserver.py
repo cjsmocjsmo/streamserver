@@ -353,7 +353,7 @@ def start_gst_rtsp_server():
 
         def do_create_element(self, url):
             logger.info(f"RTSPMediaFactory: Creating element for URL: {url}")
-            return super().do_create_element(url)
+            return GstRtspServer.RTSPMediaFactory.do_create_element(self, url)
 
     class CustomRTSPServer(GstRtspServer.RTSPServer):
         def __init__(self):

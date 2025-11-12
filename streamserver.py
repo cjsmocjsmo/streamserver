@@ -185,6 +185,12 @@ def start_camera_streaming(picam2, encoder, output):
                 frame_buffer.append(annotated.copy())
                 if motion_found and not recording_event['active']:
                     logger.info(f"🚨 Motion detected! Boxes: {motion_boxes}")
+                    # Save annotated frame as JPG on motion detection
+                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    jpg_filename = f"motion_{ts}.jpg"
+                    jpg_path = os.path.join(VIDEO_DIR, jpg_filename)
+                    cv2.imwrite(jpg_path, annotated)
+                    logger.info(f"🖼️ Saved motion event image: {jpg_path}")
                     recording_event['active'] = True
                     post_event_frames['count'] = FPS * POST_EVENT_SEC
                     event_frames = list(frame_buffer)

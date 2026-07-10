@@ -328,7 +328,7 @@ def start_rtsp_server(output, port=8554):
 
 
 # --- GStreamer RTSP Server Integration ---
-def start_gst_rtsp_server():
+def start_gst_rtsp_server(fifo_path, port=8554):
     import gi
     gi.require_version('Gst', '1.0')
     gi.require_version('GstRtspServer', '1.0')
@@ -347,7 +347,6 @@ def start_gst_rtsp_server():
         except Exception:
             return "localhost"
 
-    fifo_path = "/tmp/picamera2_stream_fifo.h264"
     class RTSPMediaFactory(GstRtspServer.RTSPMediaFactory):
         def __init__(self):
             super().__init__()
@@ -372,29 +371,14 @@ def start_gst_rtsp_server():
             return super().client_connected(client)
 
     server = CustomRTSPServer()
+    server.set_service(str(port))
     factory = RTSPMediaFactory()
     factory.set_shared(True)
     mounts = server.get_mount_points()
     mounts.add_factory("/stream", factory)
     server.attach(None)
     ip = get_ip()
-    logger.info(f"🟢 GStreamer RTSP server running at rtsp://{ip}:8554/stream")
-    # Run in a background thread
-    def run_loop():
-        loop = GLib.MainLoop()
-        loop.run()
-    t = threading.Thread(target=run_loop, daemon=True)
-    t.start()
-    return t
-
-    server = GstRtspServer.RTSPServer()
-    factory = RTSPMediaFactory()
-    factory.set_shared(True)
-    mounts = server.get_mount_points()
-    mounts.add_factory("/stream", factory)
-    server.attach(None)
-    ip = get_ip()
-    logger.info(f"🟢 GStreamer RTSP server running at rtsp://{ip}:8554/stream")
+    logger.info(f"🟢 GStreamer RTSP server running at rtsp://{ip}:{port}/stream")
     # Run in a background thread
     def run_loop():
         loop = GLib.MainLoop()
@@ -410,13 +394,8 @@ def main():
     logger.info("🚀 Starting RTSP Stream Server main()")
     picam2, encoder, fifo_path = initialize_camera(config)
     logger.info("🔧 Camera and encoder initialized. Starting streaming pipeline...")
-    # Open FIFO for reading in background to prevent deadlock
-    def keep_fifo_open_for_read(path):
-        with open(path, 'rb', buffering=0):
-            while True:
-                time.sleep(1)
-    fifo_reader_thread = threading.Thread(target=keep_fifo_open_for_read, args=(fifo_path,), daemon=True)
-    fifo_reader_thread.start()
+    # Start GStreamer RTSP server first so it is the active FIFO reader.
+    gst_thread = start_gst_rtsp_server(fifo_path, port=config.server.port)
     # Pass both output and fifo_path to streaming logic (output=None means only RTSP streaming)
     output = (None, fifo_path)
     logger.info("🟢 Starting camera streaming (motion detection, event handling, SCP, MQTT)...")
@@ -425,8 +404,6 @@ def main():
         logger.info("✅ Camera streaming pipeline is running.")
     else:
         logger.error("❌ Camera streaming pipeline failed to start.")
-    # Start GStreamer RTSP server
-    gst_thread = start_gst_rtsp_server()
     try:
         while True:
             time.sleep(1)
